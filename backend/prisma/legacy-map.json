@@ -1,0 +1,942 @@
+{
+  "users": {
+    "model": "User",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "username": {
+        "column": "username",
+        "type": "String"
+      },
+      "displayName": {
+        "column": "display_name",
+        "type": "String"
+      },
+      "passwordHash": {
+        "column": "password_hash",
+        "type": "String"
+      },
+      "role": {
+        "column": "role",
+        "type": "UserRole"
+      },
+      "active": {
+        "column": "active",
+        "type": "Boolean"
+      },
+      "failedAttempts": {
+        "column": "failed_attempts",
+        "type": "Int"
+      },
+      "lockedUntil": {
+        "column": "locked_until",
+        "type": "DateTime?"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "auth_sessions": {
+    "model": "AuthSession",
+    "fields": {
+      "tokenHash": {
+        "column": "token_hash",
+        "type": "String"
+      },
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "expiresAt": {
+        "column": "expires_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "organizations": {
+    "model": "Organization",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "name": {
+        "column": "name",
+        "type": "String"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "organization_users": {
+    "model": "OrganizationUser",
+    "fields": {
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      },
+      "organizationId": {
+        "column": "organization_id",
+        "type": "Int"
+      },
+      "role": {
+        "column": "role",
+        "type": "OrgRole"
+      }
+    }
+  },
+  "events": {
+    "model": "Event",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "name": {
+        "column": "name",
+        "type": "String"
+      },
+      "subtitle": {
+        "column": "subtitle",
+        "type": "String"
+      },
+      "description": {
+        "column": "description",
+        "type": "String"
+      },
+      "organization": {
+        "column": "organization",
+        "type": "String"
+      },
+      "eventType": {
+        "column": "event_type",
+        "type": "String"
+      },
+      "status": {
+        "column": "status",
+        "type": "EventStatus"
+      },
+      "archived": {
+        "column": "archived",
+        "type": "Boolean"
+      },
+      "eventDate": {
+        "column": "event_date",
+        "type": "DateTime"
+      },
+      "startsAt": {
+        "column": "starts_at",
+        "type": "DateTime"
+      },
+      "endsAt": {
+        "column": "ends_at",
+        "type": "DateTime"
+      },
+      "timezone": {
+        "column": "timezone",
+        "type": "String"
+      },
+      "distributionStart": {
+        "column": "distribution_start",
+        "type": "DateTime?"
+      },
+      "distributionEnd": {
+        "column": "distribution_end",
+        "type": "DateTime?"
+      },
+      "registrationDeadline": {
+        "column": "registration_deadline",
+        "type": "DateTime?"
+      },
+      "country": {
+        "column": "country",
+        "type": "String"
+      },
+      "city": {
+        "column": "city",
+        "type": "String"
+      },
+      "venue": {
+        "column": "venue",
+        "type": "String"
+      },
+      "building": {
+        "column": "building",
+        "type": "String"
+      },
+      "address": {
+        "column": "address",
+        "type": "String"
+      },
+      "instructions": {
+        "column": "instructions",
+        "type": "String"
+      },
+      "capacity": {
+        "column": "capacity",
+        "type": "Int"
+      },
+      "maxTickets": {
+        "column": "max_tickets",
+        "type": "Int"
+      },
+      "logo": {
+        "column": "logo",
+        "type": "Bytes?"
+      },
+      "banner": {
+        "column": "banner",
+        "type": "Bytes?"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "organization_events": {
+    "model": "OrganizationEvent",
+    "fields": {
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "organizationId": {
+        "column": "organization_id",
+        "type": "Int"
+      }
+    }
+  },
+  "event_assignments": {
+    "model": "EventAssignment",
+    "fields": {
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "organizationId": {
+        "column": "organization_id",
+        "type": "Int"
+      }
+    }
+  },
+  "ticket_categories": {
+    "model": "TicketCategory",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "name": {
+        "column": "name",
+        "type": "String"
+      },
+      "code": {
+        "column": "code",
+        "type": "String"
+      },
+      "description": {
+        "column": "description",
+        "type": "String"
+      },
+      "color": {
+        "column": "color",
+        "type": "String"
+      },
+      "allocation": {
+        "column": "allocation",
+        "type": "Int"
+      },
+      "maxPerAttendee": {
+        "column": "max_per_attendee",
+        "type": "Int"
+      },
+      "price": {
+        "column": "price",
+        "type": "Decimal"
+      },
+      "active": {
+        "column": "active",
+        "type": "Boolean"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "entrances": {
+    "model": "Entrance",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "name": {
+        "column": "name",
+        "type": "String"
+      },
+      "code": {
+        "column": "code",
+        "type": "String"
+      },
+      "description": {
+        "column": "description",
+        "type": "String"
+      },
+      "location": {
+        "column": "location",
+        "type": "String"
+      },
+      "instructions": {
+        "column": "instructions",
+        "type": "String"
+      },
+      "active": {
+        "column": "active",
+        "type": "Boolean"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "entrance_category_permissions": {
+    "model": "EntrancePermission",
+    "fields": {
+      "entranceId": {
+        "column": "entrance_id",
+        "type": "Int"
+      },
+      "categoryId": {
+        "column": "category_id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      }
+    }
+  },
+  "attendees": {
+    "model": "Attendee",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "categoryId": {
+        "column": "category_id",
+        "type": "Int"
+      },
+      "fullName": {
+        "column": "full_name",
+        "type": "String"
+      },
+      "email": {
+        "column": "email",
+        "type": "String?"
+      },
+      "phone": {
+        "column": "phone",
+        "type": "String"
+      },
+      "identityNumber": {
+        "column": "identity_number",
+        "type": "String?"
+      },
+      "organization": {
+        "column": "organization",
+        "type": "String"
+      },
+      "status": {
+        "column": "status",
+        "type": "AttendeeStatus"
+      },
+      "notes": {
+        "column": "notes",
+        "type": "String"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "tickets": {
+    "model": "Ticket",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "number": {
+        "column": "number",
+        "type": "String"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "attendeeId": {
+        "column": "attendee_id",
+        "type": "Int"
+      },
+      "categoryId": {
+        "column": "category_id",
+        "type": "Int"
+      },
+      "tokenHash": {
+        "column": "token_hash",
+        "type": "String"
+      },
+      "status": {
+        "column": "status",
+        "type": "TicketStatus"
+      },
+      "expiresAt": {
+        "column": "expires_at",
+        "type": "DateTime"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "check_ins": {
+    "model": "CheckIn",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "ticketId": {
+        "column": "ticket_id",
+        "type": "Int"
+      },
+      "entranceId": {
+        "column": "entrance_id",
+        "type": "Int"
+      },
+      "staffId": {
+        "column": "staff_id",
+        "type": "Int"
+      },
+      "checkedAt": {
+        "column": "checked_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "audit_logs": {
+    "model": "AuditLog",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "actorId": {
+        "column": "actor_id",
+        "type": "Int?"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int?"
+      },
+      "action": {
+        "column": "action",
+        "type": "String"
+      },
+      "details": {
+        "column": "details",
+        "type": "String"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "event_settings": {
+    "model": "EventSetting",
+    "fields": {
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "key": {
+        "column": "key",
+        "type": "String"
+      },
+      "value": {
+        "column": "value",
+        "type": "String"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "email_deliveries": {
+    "model": "EmailDelivery",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "ticketId": {
+        "column": "ticket_id",
+        "type": "Int"
+      },
+      "tokenHash": {
+        "column": "token_hash",
+        "type": "String"
+      },
+      "recipient": {
+        "column": "recipient",
+        "type": "String"
+      },
+      "status": {
+        "column": "status",
+        "type": "EmailStatus"
+      },
+      "attempts": {
+        "column": "attempts",
+        "type": "Int"
+      },
+      "messageId": {
+        "column": "message_id",
+        "type": "String"
+      },
+      "sentAt": {
+        "column": "sent_at",
+        "type": "DateTime?"
+      },
+      "lastError": {
+        "column": "last_error",
+        "type": "String"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "security_profiles": {
+    "model": "SecurityProfile",
+    "fields": {
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      },
+      "email": {
+        "column": "email",
+        "type": "String?"
+      },
+      "emailVerified": {
+        "column": "email_verified",
+        "type": "Boolean"
+      },
+      "factorMethod": {
+        "column": "factor_method",
+        "type": "String"
+      },
+      "totpSecret": {
+        "column": "totp_secret",
+        "type": "String"
+      },
+      "totpCounter": {
+        "column": "totp_counter",
+        "type": "Int"
+      },
+      "forcePassword": {
+        "column": "force_password",
+        "type": "Boolean"
+      },
+      "photo": {
+        "column": "photo",
+        "type": "Bytes?"
+      }
+    }
+  },
+  "security_sessions": {
+    "model": "SecuritySession",
+    "fields": {
+      "tokenHash": {
+        "column": "token_hash",
+        "type": "String"
+      },
+      "lastSeen": {
+        "column": "last_seen",
+        "type": "DateTime"
+      },
+      "verified": {
+        "column": "verified",
+        "type": "Boolean"
+      },
+      "attempts": {
+        "column": "attempts",
+        "type": "Int"
+      },
+      "enrollmentSecret": {
+        "column": "enrollment_secret",
+        "type": "String"
+      }
+    }
+  },
+  "recovery_codes": {
+    "model": "RecoveryCode",
+    "fields": {
+      "tokenHash": {
+        "column": "token_hash",
+        "type": "String"
+      },
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      }
+    }
+  },
+  "action_tokens": {
+    "model": "ActionToken",
+    "fields": {
+      "tokenHash": {
+        "column": "token_hash",
+        "type": "String"
+      },
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      },
+      "purpose": {
+        "column": "purpose",
+        "type": "String"
+      },
+      "payload": {
+        "column": "payload",
+        "type": "String"
+      },
+      "expiresAt": {
+        "column": "expires_at",
+        "type": "DateTime"
+      },
+      "attempts": {
+        "column": "attempts",
+        "type": "Int"
+      }
+    }
+  },
+  "permission_overrides": {
+    "model": "PermissionOverride",
+    "fields": {
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      },
+      "permission": {
+        "column": "permission",
+        "type": "String"
+      },
+      "allowed": {
+        "column": "allowed",
+        "type": "Boolean"
+      }
+    }
+  },
+  "access_codes": {
+    "model": "AccessCode",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "name": {
+        "column": "name",
+        "type": "String"
+      },
+      "codeHash": {
+        "column": "code_hash",
+        "type": "String"
+      },
+      "active": {
+        "column": "active",
+        "type": "Boolean"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "code_entrances": {
+    "model": "CodeEntrance",
+    "fields": {
+      "codeId": {
+        "column": "code_id",
+        "type": "Int"
+      },
+      "entranceId": {
+        "column": "entrance_id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      }
+    }
+  },
+  "code_staff": {
+    "model": "CodeStaff",
+    "fields": {
+      "codeId": {
+        "column": "code_id",
+        "type": "Int"
+      },
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      }
+    }
+  },
+  "scanner_sessions": {
+    "model": "ScannerSession",
+    "fields": {
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      },
+      "tokenHash": {
+        "column": "token_hash",
+        "type": "String"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "codeId": {
+        "column": "code_id",
+        "type": "Int"
+      },
+      "entranceId": {
+        "column": "entrance_id",
+        "type": "Int?"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "lastSeen": {
+        "column": "last_seen",
+        "type": "DateTime"
+      }
+    }
+  },
+  "scanner_preferences": {
+    "model": "ScannerPreference",
+    "fields": {
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      },
+      "successSound": {
+        "column": "success_sound",
+        "type": "Boolean"
+      },
+      "rejectionSound": {
+        "column": "rejection_sound",
+        "type": "Boolean"
+      },
+      "successVibration": {
+        "column": "success_vibration",
+        "type": "Boolean"
+      },
+      "rejectionVibration": {
+        "column": "rejection_vibration",
+        "type": "Boolean"
+      }
+    }
+  },
+  "scan_attempts": {
+    "model": "ScanAttempt",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int"
+      },
+      "userId": {
+        "column": "user_id",
+        "type": "Int"
+      },
+      "sessionHash": {
+        "column": "session_hash",
+        "type": "String"
+      },
+      "ticketNumber": {
+        "column": "ticket_number",
+        "type": "String"
+      },
+      "guestName": {
+        "column": "guest_name",
+        "type": "String"
+      },
+      "accepted": {
+        "column": "accepted",
+        "type": "Boolean"
+      },
+      "message": {
+        "column": "message",
+        "type": "String"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      }
+    }
+  },
+  "background_jobs": {
+    "model": "BackgroundJob",
+    "fields": {
+      "id": {
+        "column": "id",
+        "type": "Int"
+      },
+      "organizationId": {
+        "column": "organization_id",
+        "type": "Int"
+      },
+      "eventId": {
+        "column": "event_id",
+        "type": "Int?"
+      },
+      "kind": {
+        "column": "kind",
+        "type": "String"
+      },
+      "payload": {
+        "column": "payload",
+        "type": "String"
+      },
+      "dedupeKey": {
+        "column": "dedupe_key",
+        "type": "String"
+      },
+      "status": {
+        "column": "status",
+        "type": "JobStatus"
+      },
+      "attempts": {
+        "column": "attempts",
+        "type": "Int"
+      },
+      "availableAt": {
+        "column": "available_at",
+        "type": "DateTime"
+      },
+      "leaseUntil": {
+        "column": "lease_until",
+        "type": "DateTime?"
+      },
+      "leaseToken": {
+        "column": "lease_token",
+        "type": "String"
+      },
+      "lastError": {
+        "column": "last_error",
+        "type": "String"
+      },
+      "createdAt": {
+        "column": "created_at",
+        "type": "DateTime"
+      },
+      "updatedAt": {
+        "column": "updated_at",
+        "type": "DateTime"
+      }
+    }
+  }
+}

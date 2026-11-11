@@ -1,0 +1,41 @@
+﻿# Preparation only. Do not apply to an account without approval.
+services:
+  - type: web
+    name: dream-events-api
+    runtime: node
+    rootDir: backend
+    plan: starter
+    buildCommand: npm ci && npm run prisma:generate && npm run build
+    startCommand: npm run start:prod
+    healthCheckPath: /api/v1/health
+    autoDeployTrigger: 'off'
+    envVars:
+      - key: NODE_VERSION
+        value: 24.15.0
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY_HOPS
+        value: '1'
+      - key: PG_SSL
+        value: 'true'
+      - key: PG_POOL_MAX
+        value: '5'
+      - key: EMAIL_ENABLED
+        value: 'false'
+      - key: NODE_DATABASE_URL
+        sync: false
+      - key: PG_CA_CERT
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: APP_ENCRYPTION_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: RESEND_WEBHOOK_SECRET
+        sync: false
+

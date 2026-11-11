@@ -1,0 +1,834 @@
+generator client {
+  provider = "prisma-client-js"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             Int      @id @default(autoincrement())
+  username       String   @unique @db.VarChar(80)
+  displayName    String   @db.VarChar(160) @map("display_name")
+  passwordHash   String   @db.Text @map("password_hash")
+  role           UserRole @default(admin)
+  active         Boolean  @default(true)
+  failedAttempts Int      @default(0) @map("failed_attempts")
+  lockedUntil    DateTime? @map("locked_until") @db.Timestamp(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  authSessions      AuthSession[]
+  organizationUser  OrganizationUser?
+  eventAssignments  EventAssignment[]
+  scannerSession    ScannerSession?
+  scannerPreference ScannerPreference?
+  securityProfile   SecurityProfile?
+  recoveryCodes     RecoveryCode[]
+  actionTokens      ActionToken[]
+  permissionOverrides PermissionOverride[]
+  codeStaff         CodeStaff[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  admin
+  staff
+}
+
+model AuthSession {
+  tokenHash String   @id @db.VarChar(64) @map("token_hash")
+  userId    Int @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  expiresAt DateTime @map("expires_at") @db.Timestamp(6)
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  securitySession SecuritySession?
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+model Organization {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(200)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  organizationUsers  OrganizationUser[]
+  organizationEvents OrganizationEvent[]
+  eventAssignments   EventAssignment[]
+  backgroundJobs     BackgroundJob[]
+  ticketTemplates    TicketTemplate[]
+
+  @@map("organizations")
+}
+
+model OrganizationUser {
+  userId         Int @map("user_id")
+  organizationId Int @map("organization_id")
+  role           OrgRole
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@id([userId])
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("organization_users")
+}
+
+enum OrgRole {
+  super_admin
+  event_manager
+  ticket_manager
+  checkin_supervisor
+  scanner
+}
+
+model Event {
+  id                   Int       @id @default(autoincrement())
+  name                 String    @db.VarChar(200)
+  subtitle             String    @default("") @db.VarChar(200)
+  description          String    @default("") @db.Text
+  organization         String    @default("AAST") @db.VarChar(200)
+  eventType            String    @default("University event") @db.VarChar(100) @map("event_type")
+  status               EventStatus @default(Draft)
+  archived             Boolean   @default(false)
+  eventDate            DateTime  @db.Date @map("event_date")
+  startsAt             DateTime @map("starts_at") @db.Timestamp(6)
+  endsAt               DateTime @map("ends_at") @db.Timestamp(6)
+  timezone             String    @default("Africa/Cairo") @db.VarChar(80)
+  distributionStart    DateTime? @map("distribution_start") @db.Timestamp(6)
+  distributionEnd      DateTime? @map("distribution_end") @db.Timestamp(6)
+  registrationDeadline DateTime? @map("registration_deadline") @db.Timestamp(6)
+  country              String    @default("Egypt") @db.VarChar(100)
+  city                 String    @default("") @db.VarChar(100)
+  venue                String    @db.VarChar(200)
+  building             String    @default("") @db.VarChar(200)
+  address              String    @default("") @db.VarChar(500)
+  instructions         String    @default("") @db.Text
+  capacity             Int
+  maxTickets           Int @map("max_tickets")
+  logo                 Bytes?
+  banner               Bytes?
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  categories         TicketCategory[]
+  entrances          Entrance[]
+  attendees          Attendee[]
+  tickets            Ticket[]
+  checkIns           CheckIn[]
+  eventSettings      EventSetting[]
+  emailDeliveries    EmailDelivery[]
+  organizationEvent  OrganizationEvent?
+  eventAssignments   EventAssignment[]
+  accessCodes        AccessCode[]
+  scannerSessions    ScannerSession[]
+  scanAttempts       ScanAttempt[]
+  backgroundJobs     BackgroundJob[]
+  students           Student[]
+  guestInvitations   GuestInvitation[]
+  registrationFields RegistrationField[]
+  importReceipts     RegistrationImport[]
+  ticketTransfers    TicketTransfer[]
+  publicTicketLinks  PublicTicketLink[]
+
+  @@map("events")
+}
+
+enum EventStatus {
+  Upcoming
+  Active
+  Draft
+  Published
+  Ongoing
+  Completed
+  Cancelled
+}
+
+model OrganizationEvent {
+  eventId        Int @id @map("event_id")
+  organizationId Int @map("organization_id")
+
+  event        Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([eventId, organizationId])
+  @@index([organizationId])
+  @@map("organization_events")
+}
+
+model EventAssignment {
+  userId         Int @map("user_id")
+  eventId        Int @map("event_id")
+  organizationId Int @map("organization_id")
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event        Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, eventId])
+  @@map("event_assignments")
+}
+
+model TicketCategory {
+  id            Int      @id @default(autoincrement())
+  eventId       Int @map("event_id")
+  name          String   @db.VarChar(120)
+  code          String   @db.VarChar(40)
+  description   String   @default("") @db.Text
+  color         String   @default("#142D4E") @db.VarChar(7)
+  allocation    Int
+  maxPerAttendee Int     @default(1) @map("max_per_attendee")
+  price         Decimal  @default(0) @db.Decimal(12, 2)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  event               Event                @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  attendees           Attendee[]
+  tickets             Ticket[]
+  entrancePermissions EntrancePermission[]
+
+  @@unique([eventId, code])
+  @@unique([eventId, name])
+  @@map("ticket_categories")
+}
+
+model Entrance {
+  id           Int      @id @default(autoincrement())
+  eventId      Int @map("event_id")
+  name         String   @db.VarChar(120)
+  code         String   @db.VarChar(40)
+  description  String   @default("") @db.Text
+  location     String   @default("") @db.VarChar(200)
+  instructions String   @default("") @db.Text
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  event               Event                @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  entrancePermissions EntrancePermission[]
+  checkIns            CheckIn[]
+  codeEntrances       CodeEntrance[]
+  scannerSessions     ScannerSession[]
+
+  @@unique([eventId, code])
+  @@unique([eventId, name])
+  @@index([eventId])
+  @@map("entrances")
+}
+
+model EntrancePermission {
+  entranceId Int @map("entrance_id")
+  categoryId Int @map("category_id")
+  eventId    Int @map("event_id")
+
+  entrance Entrance       @relation(fields: [entranceId], references: [id], onDelete: Cascade)
+  category TicketCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([entranceId, categoryId])
+  @@map("entrance_category_permissions")
+}
+
+model Attendee {
+  id             Int      @id @default(autoincrement())
+  eventId        Int @map("event_id")
+  categoryId     Int @map("category_id")
+  fullName       String   @db.VarChar(200) @map("full_name")
+  email          String?  @db.VarChar(254)
+  phone          String   @default("") @db.VarChar(40)
+  identityNumber String?  @db.VarChar(100) @map("identity_number")
+  organization   String   @default("") @db.VarChar(200)
+  status         AttendeeStatus @default(Registered)
+  notes          String   @default("") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  event    Event          @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  category TicketCategory @relation(fields: [categoryId], references: [id])
+  tickets  Ticket[]
+  guestInvitation GuestInvitation?
+  transfersFrom   TicketTransfer[] @relation("TransfersFrom")
+  transfersTo     TicketTransfer[] @relation("TransfersTo")
+
+  @@unique([eventId, email])
+  @@unique([eventId, identityNumber])
+  @@index([eventId])
+  @@index([eventId, fullName])
+  @@map("attendees")
+}
+
+enum AttendeeStatus {
+  Registered
+  Cancelled
+}
+
+model Ticket {
+  id         Int      @id @default(autoincrement())
+  number     String   @unique @db.VarChar(40)
+  eventId    Int @map("event_id")
+  attendeeId Int @map("attendee_id")
+  categoryId Int @map("category_id")
+  tokenHash  String   @unique @db.VarChar(64) @map("token_hash")
+  status     TicketStatus @default(Active)
+  expiresAt  DateTime @map("expires_at") @db.Timestamp(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  event           Event           @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  attendee        Attendee        @relation(fields: [attendeeId], references: [id])
+  category        TicketCategory  @relation(fields: [categoryId], references: [id])
+  checkIn         CheckIn?
+  emailDeliveries EmailDelivery[]
+  credential TicketCredential?
+  dispatches TicketDispatch[]
+  transfers  TicketTransfer[]
+  publicTicketLinks PublicTicketLink[]
+
+  @@index([eventId])
+  @@index([status])
+  @@map("tickets")
+}
+
+enum TicketStatus {
+  Cancelled
+  Active
+  Used
+  Revoked
+  Expired
+}
+
+// Recoverable credentials are encrypted separately; never included in ticket responses.
+model TicketCredential {
+  ticketId Int @id @map("ticket_id")
+  tokenHash String @map("token_hash") @db.VarChar(64)
+  protectedToken String @map("protected_token") @db.Text
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  @@map("ticket_credentials")
+}
+model TicketIssueReceipt {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  actorId Int? @map("actor_id")
+  requestKey String @map("request_key") @db.VarChar(80)
+  contentHash String @map("content_hash") @db.VarChar(64)
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  @@unique([eventId, requestKey])
+  @@map("ticket_issue_receipts")
+}
+
+// Limited bearer capabilities, distinct from login sessions and entry credentials.
+model PublicInvitationLink {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  studentId Int @map("student_id")
+  tokenHash String @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime @map("expires_at") @db.Timestamp(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamp(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  @@index([eventId, studentId])
+  @@map("public_invitation_links")
+}
+model PublicInvitationOperation {
+  id Int @id @default(autoincrement())
+  linkId Int @map("link_id")
+  requestKey String @map("request_key") @db.VarChar(80)
+  contentHash String @map("content_hash") @db.VarChar(64)
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  @@unique([linkId, requestKey])
+  @@map("public_invitation_operations")
+}
+
+// Limited bearer capabilities for mobile ticket access, distinct from login sessions and entry credentials.
+model PublicTicketLink {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  ticketId Int @map("ticket_id")
+  tokenHash String @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime @map("expires_at") @db.Timestamp(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamp(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+
+  @@index([eventId, ticketId])
+  @@map("public_ticket_links")
+}
+
+model PublicTicketOperation {
+  id Int @id @default(autoincrement())
+  linkId Int @map("link_id")
+  requestKey String @map("request_key") @db.VarChar(80)
+  contentHash String @map("content_hash") @db.VarChar(64)
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@unique([linkId, requestKey])
+  @@map("public_ticket_operations")
+}
+
+model TicketTransfer {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  ticketId Int @map("ticket_id")
+  fromAttendeeId Int @map("from_attendee_id")
+  toAttendeeId Int? @map("to_attendee_id")
+  newTicketId Int? @map("new_ticket_id")
+  initiatedBy String @map("initiated_by") @db.VarChar(20)
+  requesterActorId Int? @map("requester_actor_id")
+  recipientName String @map("recipient_name") @db.VarChar(200)
+  recipientEmail String? @map("recipient_email") @db.VarChar(254)
+  recipientPhone String @default("") @map("recipient_phone") @db.VarChar(40)
+  customValues Json @default("{}") @map("custom_values")
+  reason String @default("") @db.Text
+  status TicketTransferStatus @default(Pending)
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamp(6)
+  resolvedBy Int? @map("resolved_by")
+  rejectionReason String @default("") @map("rejection_reason") @db.Text
+  deadline DateTime? @db.Timestamp(6)
+  superAdminOverride Boolean @default(false) @map("super_admin_override")
+  overrideReason String @default("") @map("override_reason") @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  fromAttendee Attendee @relation("TransfersFrom", fields: [fromAttendeeId], references: [id], onDelete: Restrict)
+  toAttendee Attendee? @relation("TransfersTo", fields: [toAttendeeId], references: [id], onDelete: Restrict)
+  requesterActor AccountIdentity? @relation("TicketTransfersRequested", fields: [requesterActorId], references: [id], onDelete: Restrict)
+  resolver AccountIdentity? @relation("TicketTransfersResolved", fields: [resolvedBy], references: [id], onDelete: Restrict)
+
+  @@index([eventId, status])
+  @@index([ticketId])
+  @@map("ticket_transfers")
+}
+
+enum TicketTransferStatus {
+  Pending
+  Approved
+  Rejected
+  Cancelled
+}
+
+model TicketTemplate {
+  id Int @id @default(autoincrement())
+  organizationId Int @map("organization_id")
+  name String @db.VarChar(100)
+  config Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Restrict)
+  @@unique([organizationId, name])
+  @@map("ticket_templates")
+}
+
+model CheckIn {
+  id         Int      @id @default(autoincrement())
+  eventId    Int @map("event_id")
+  ticketId   Int      @unique @map("ticket_id")
+  entranceId Int @map("entrance_id")
+  staffId    Int @map("staff_id")
+  checkedAt  DateTime @default(now()) @map("checked_at") @db.Timestamp(6)
+
+  event    Event    @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  ticket   Ticket   @relation(fields: [ticketId], references: [id])
+  entrance Entrance @relation(fields: [entranceId], references: [id])
+  staff    AccountIdentity @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  @@index([eventId])
+  @@index([checkedAt])
+  @@map("check_ins")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  actorId   Int? @map("actor_id")
+  eventId   Int? @map("event_id")
+  action    String   @db.VarChar(100)
+  details   String   @default("") @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  actor AccountIdentity? @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([eventId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model EventSetting {
+  eventId   Int @map("event_id")
+  key       String   @db.VarChar(100)
+  value     String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, key])
+  @@map("event_settings")
+}
+
+model EmailDelivery {
+  id          Int      @id @default(autoincrement())
+  eventId     Int @map("event_id")
+  ticketId    Int @map("ticket_id")
+  tokenHash   String   @db.VarChar(64) @map("token_hash")
+  recipient   String   @db.VarChar(254)
+  status      EmailStatus @default(Pending)
+  attempts    Int      @default(1)
+  messageId   String   @db.VarChar(255) @map("message_id")
+  sentAt      DateTime? @map("sent_at") @db.Timestamp(6)
+  lastError   String   @default("") @db.VarChar(500) @map("last_error")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  event  Event  @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  ticket Ticket @relation(fields: [ticketId], references: [id])
+
+  @@unique([ticketId, tokenHash, recipient])
+  @@index([eventId])
+  @@map("email_deliveries")
+}
+
+enum EmailStatus {
+  Pending
+  Sent
+  Failed
+  Unknown
+}
+
+model SecurityProfile {
+  userId          Int     @id @map("user_id")
+  email           String? @unique @db.VarChar(254)
+  emailVerified   Boolean @default(false) @map("email_verified")
+  factorMethod    String  @default("") @db.VarChar(12) @map("factor_method")
+  totpSecret      String  @default("") @db.Text @map("totp_secret")
+  totpCounter     Int     @default(-1) @map("totp_counter")
+  forcePassword   Boolean @default(false) @map("force_password")
+  photo           Bytes?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("security_profiles")
+}
+
+model SecuritySession {
+  tokenHash          String   @id @db.VarChar(64) @map("token_hash")
+  lastSeen           DateTime @default(now()) @map("last_seen") @db.Timestamp(6)
+  verified           Boolean  @default(false)
+  attempts           Int      @default(0)
+  enrollmentSecret   String   @default("") @db.Text @map("enrollment_secret")
+
+  authSession AuthSession @relation(fields: [tokenHash], references: [tokenHash], onDelete: Cascade)
+
+  @@map("security_sessions")
+}
+
+model RecoveryCode {
+  tokenHash String @id @db.VarChar(64) @map("token_hash")
+  userId    Int @map("user_id")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("recovery_codes")
+}
+
+model ActionToken {
+  tokenHash String   @id @db.VarChar(64) @map("token_hash")
+  userId    Int @map("user_id")
+  purpose   String   @db.VarChar(100)
+  payload   String   @default("") @db.Text
+  expiresAt DateTime @map("expires_at") @db.Timestamp(6)
+  attempts  Int      @default(0)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("action_tokens")
+}
+
+model PermissionOverride {
+  userId     Int @map("user_id")
+  permission String  @db.VarChar(60)
+  allowed    Boolean
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@id([userId, permission])
+  @@map("permission_overrides")
+}
+
+model AccessCode {
+  id        Int      @id @default(autoincrement())
+  eventId   Int @map("event_id")
+  name      String   @db.VarChar(120)
+  codeHash  String   @unique @db.VarChar(64) @map("code_hash")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  event           Event            @relation(fields: [eventId], references: [id])
+  codeEntrances   CodeEntrance[]
+  codeStaff       CodeStaff[]
+  scannerSessions ScannerSession[]
+
+  @@index([eventId])
+  @@map("access_codes")
+}
+
+model CodeEntrance {
+  codeId     Int @map("code_id")
+  entranceId Int @map("entrance_id")
+  eventId    Int @map("event_id")
+
+  code     AccessCode @relation(fields: [codeId], references: [id], onDelete: Cascade)
+  entrance Entrance   @relation(fields: [entranceId], references: [id], onDelete: Cascade)
+
+  @@id([codeId, entranceId])
+  @@map("code_entrances")
+}
+
+model CodeStaff {
+  codeId Int @map("code_id")
+  userId Int @map("user_id")
+
+  code AccessCode @relation(fields: [codeId], references: [id], onDelete: Cascade)
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([codeId, userId])
+  @@map("code_staff")
+}
+
+model ScannerSession {
+  userId     Int      @id @map("user_id")
+  tokenHash  String   @unique @db.VarChar(64) @map("token_hash")
+  eventId    Int @map("event_id")
+  codeId     Int @map("code_id")
+  entranceId Int? @map("entrance_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  lastSeen   DateTime @default(now()) @map("last_seen") @db.Timestamp(6)
+
+  user     User        @relation(fields: [userId], references: [id])
+  event    Event       @relation(fields: [eventId], references: [id])
+  code     AccessCode  @relation(fields: [codeId], references: [id])
+  entrance Entrance?   @relation(fields: [entranceId], references: [id])
+
+  @@map("scanner_sessions")
+}
+
+model ScannerPreference {
+  userId            Int     @id @map("user_id")
+  successSound      Boolean @default(true) @map("success_sound")
+  rejectionSound    Boolean @default(true) @map("rejection_sound")
+  successVibration  Boolean @default(true) @map("success_vibration")
+  rejectionVibration Boolean @default(true) @map("rejection_vibration")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("scanner_preferences")
+}
+
+model ScanAttempt {
+  id           Int      @id @default(autoincrement())
+  eventId      Int @map("event_id")
+  userId       Int @map("user_id")
+  sessionHash  String   @db.VarChar(64) @map("session_hash")
+  ticketNumber String   @default("") @db.VarChar(40) @map("ticket_number")
+  guestName    String   @default("") @db.VarChar(200) @map("guest_name")
+  accepted     Boolean
+  message      String   @db.VarChar(500)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  event Event @relation(fields: [eventId], references: [id])
+  user  AccountIdentity @relation(fields: [userId], references: [id])
+
+  @@index([eventId])
+  @@index([userId])
+  @@map("scan_attempts")
+}
+
+model BackgroundJob {
+  mailDelivery MailDelivery?
+  ticketDispatch TicketDispatch?
+  ticketNotice TicketMailNotice?
+  id             Int      @id @default(autoincrement())
+  organizationId Int @map("organization_id")
+  eventId        Int? @map("event_id")
+  kind           String   @db.VarChar(40)
+  payload        String   @db.Text
+  dedupeKey      String   @unique @db.VarChar(255) @map("dedupe_key")
+  status         JobStatus @default(Pending)
+  attempts       Int      @default(0)
+  availableAt    DateTime @default(now()) @map("available_at") @db.Timestamp(6)
+  leaseUntil     DateTime? @map("lease_until") @db.Timestamp(6)
+  leaseToken     String   @default("") @db.VarChar(64) @map("lease_token")
+  lastError      String   @default("") @db.VarChar(500) @map("last_error")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  event        Event?       @relation(fields: [eventId], references: [id])
+
+  @@index([organizationId])
+  @@index([eventId])
+  @@index([status, availableAt])
+  @@map("background_jobs")
+}
+
+enum JobStatus {
+  Pending
+  Running
+  Sent
+  Failed
+  Unknown
+}
+
+// Node-only durable Resend tracking; legacy delivery records remain untouched.
+model MailDelivery {
+  jobId Int @id @map("job_id")
+  providerMessageId String? @unique @map("provider_message_id") @db.VarChar(120)
+  status String @default("Pending") @db.VarChar(24)
+  firstAttemptAt DateTime? @map("first_attempt_at") @db.Timestamp(6)
+  lastEventAt DateTime? @map("last_event_at") @db.Timestamp(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  job BackgroundJob @relation(fields:[jobId],references:[id],onDelete:Restrict)
+  @@map("mail_deliveries")
+}
+model MailWebhook {
+  id String @id @db.VarChar(160)
+  providerMessageId String @map("provider_message_id") @db.VarChar(120)
+  eventType String @map("event_type") @db.VarChar(40)
+  occurredAt DateTime @map("occurred_at") @db.Timestamp(6)
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamp(6)
+  @@index([providerMessageId,occurredAt])
+  @@map("mail_webhooks")
+}
+
+// Node-only invitation entities. Legacy attendee rows are never converted.
+model Student {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  studentId String @map("student_id") @db.VarChar(100)
+  fullName String @map("full_name") @db.VarChar(200)
+  email String @db.VarChar(254)
+  phone String @default("") @db.VarChar(40)
+  active Boolean @default(true)
+  guestLimit Int? @map("guest_limit")
+  customValues Json @default("{}") @map("custom_values")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  guests GuestInvitation[]
+  @@unique([id,eventId], map: "students_id_event_identity")
+  @@unique([eventId, studentId])
+  @@index([eventId, fullName])
+  @@map("students")
+}
+model GuestInvitation {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  studentId Int @map("student_id")
+  attendeeId Int @unique @map("attendee_id")
+  email String? @db.VarChar(254)
+  matchKey String @map("match_key") @db.VarChar(64)
+  invitationGroup String @default("") @map("invitation_group") @db.VarChar(200)
+  active Boolean @default(true)
+  customValues Json @default("{}") @map("custom_values")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  attendee Attendee @relation(fields: [attendeeId], references: [id], onDelete: Restrict)
+  @@unique([studentId, matchKey])
+  @@index([eventId])
+  @@map("guest_invitations")
+}
+model RegistrationField {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  target String @db.VarChar(10)
+  key String @db.VarChar(60)
+  label String @db.VarChar(100)
+  type String @db.VarChar(12)
+  required Boolean @default(false)
+  active Boolean @default(true)
+  options Json @default("[]")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  @@unique([eventId, target, key])
+  @@map("registration_fields")
+}
+model RegistrationImport {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  actorId Int @map("actor_id")
+  requestKey String @map("request_key") @db.VarChar(80)
+  contentHash String @map("content_hash") @db.VarChar(64)
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  @@unique([eventId, requestKey])
+  @@map("registration_imports")
+}
+
+// Historical actors survive physical removal of login accounts and credentials.
+model AccountIdentity {
+  id Int @id
+  username String @db.VarChar(80)
+  displayName String @map("display_name") @db.VarChar(160)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamp(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  auditLogs AuditLog[]
+  checkIns CheckIn[]
+  scanAttempts ScanAttempt[]
+  ticketTransfersResolved TicketTransfer[] @relation("TicketTransfersResolved")
+  ticketTransfersRequested TicketTransfer[] @relation("TicketTransfersRequested")
+  @@map("account_identities")
+}
+
+model TicketDispatch {
+  jobId Int @id @map("job_id")
+  ticketId Int @map("ticket_id")
+  eventId Int @map("event_id")
+  tokenHash String @map("token_hash") @db.VarChar(64)
+  recipient String @db.VarChar(254)
+  fingerprint String @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  job BackgroundJob @relation(fields:[jobId], references:[id], onDelete:Restrict)
+  ticket Ticket @relation(fields:[ticketId], references:[id], onDelete:Restrict)
+  @@index([eventId,ticketId])
+  @@map("ticket_dispatches")
+}
+model TicketMailOperation {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  actorId Int @map("actor_id")
+  requestKey String @map("request_key") @db.VarChar(80)
+  contentHash String @map("content_hash") @db.VarChar(64)
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  @@unique([eventId,requestKey])
+  @@map("ticket_mail_operations")
+}
+model TicketMailNotice {
+  jobId Int @id @map("job_id")
+  eventId Int @map("event_id")
+  message String @db.VarChar(200)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  job BackgroundJob @relation(fields:[jobId],references:[id],onDelete:Restrict)
+  @@index([eventId])
+  @@map("ticket_mail_notices")
+}

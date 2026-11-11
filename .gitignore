@@ -1,0 +1,26 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+.gmail-*.tmp
+data/
+generated_tickets/*
+uploads/*
+!.gitkeep
+.streamlit/secrets.toml
+tmp/
+output/
+node_modules/
+dist/
+coverage/
+backend/.env
+scanner/.env
+*.tsbuildinfo
+migration/exports/
+migration/reports/
+
+# Local frontend/provider configuration and deployment certificates
+.env.*
+!.env.example
+*.pem
+*.key

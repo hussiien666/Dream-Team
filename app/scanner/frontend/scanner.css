@@ -1,0 +1,14 @@
+.scanner {font:16px/1.5 Arial,sans-serif;color:#142d4e;max-width:640px;}
+video {width:100%;max-height:440px;background:#142d4e;object-fit:contain;border-radius:3px;display:block;}
+video[hidden] {display:none;}
+.controls {display:flex;gap:10px;flex-wrap:wrap;margin:12px 0;}
+button,select {font:inherit;padding:10px 16px;min-height:44px;border:1px solid #142d4e;border-radius:4px;}
+button {background:#142d4e;color:white;cursor:pointer;}
+button.secondary {background:white;color:#142d4e;}
+button:disabled {opacity:.5;cursor:default;}
+.status {padding:12px 16px;margin-bottom:12px;border:1px solid #d4dde6;white-space:pre-line;}
+.status:empty {display:none;}
+.status.success {color:#125b2b;background:#e8f6ed;border:2px solid #22863a;font-weight:bold;}
+.status.error {color:#902525;background:#fff0f0;border:2px solid #bd3030;font-weight:bold;}
+.help {color:#43546a;font-size:14px;}
+select {background:white;max-width:100%;}

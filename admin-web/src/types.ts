@@ -1,0 +1,88 @@
+export type Identity = {
+  user: { id: number; username: string; displayName: string };
+  role: string;
+  organizationId: number;
+  permissions: string[];
+  requiresFactor: boolean;
+  requiresPasswordChange: boolean;
+  enrolled: boolean;
+};
+export type EventRecord = {
+  id: number;
+  name: string;
+  subtitle: string;
+  description: string;
+  organization: string;
+  eventType: string;
+  venue: string;
+  country: string;
+  city: string;
+  building: string;
+  address: string;
+  instructions: string;
+  eventDate: string;
+  startsAt: string;
+  endsAt: string;
+  timezone: string;
+  capacity: number;
+  maxTickets: number;
+  status: string;
+  archived: boolean;
+  distributionStart: string | null;
+  distributionEnd: string | null;
+  registrationDeadline: string | null;
+  categories: Category[];
+  entrances: Entrance[];
+};
+export type Category = {
+  id: number;
+  name: string;
+  code: string;
+  allocation: number;
+  maxPerAttendee: number;
+  price: string;
+  description: string;
+  color: string;
+  active: boolean;
+};
+export type Entrance = {
+  id: number;
+  name: string;
+  code: string;
+  location: string;
+  instructions: string;
+  description: string;
+  active: boolean;
+  entrancePermissions?: { categoryId: number }[];
+};
+export type Staff = {
+  id: number;
+  username: string;
+  displayName: string;
+  active: boolean;
+  organizationUser: { role: string };
+  eventAssignments?: { eventId: number }[];
+};
+export type AccessCode = {
+  id: number;
+  name: string;
+  active: boolean;
+  codeEntrances: { entranceId: number }[];
+  codeStaff: { userId: number }[];
+  _count: { scannerSessions: number };
+};
+export type Settings = {
+  automaticTicketGeneration?:boolean;
+  defaultCategoryId?: number | null;
+  guestLimit?: number;
+  perStudentLimit?: number;
+  studentTicketEnabled?: boolean;
+  directGuestDelivery?: boolean;
+  studentCopies?: boolean;
+  transferApproval?: string;
+  transferDeadline?: string | null;
+  primaryColor?: string;
+  accentColor?: string;
+  notifyGuestChanges?: boolean;
+  notifyEmailFailures?: boolean;
+};

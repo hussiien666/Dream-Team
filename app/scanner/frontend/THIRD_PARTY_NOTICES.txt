@@ -1,0 +1,8 @@
+jsQR 1.4.0
+Source: https://github.com/cozmo/jsQR
+Distribution: https://www.npmjs.com/package/jsqr/v/1.4.0
+License: Apache License, Version 2.0 (see LICENSE-jsQR.txt).
+
+The bundled jsQR.js is the unmodified distribution from jsqr@1.4.0.
+The application loads it in a private module scope; scanner.js is separate
+application code. Copyright and license notices in the distribution are retained.
