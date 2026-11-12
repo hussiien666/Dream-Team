@@ -16,9 +16,25 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const res = exception.getResponse();
-      message = typeof res === 'string' ? res : (res as any).message ?? message;
+      message =
+        typeof res === 'string' ? res : (res as any).message ?? message;
     } else if (exception instanceof Error) {
-      this.logger.error(JSON.stringify({event: 'request.failed', type: exception.name}));
+      const code = (exception as Error & { code?: unknown }).code;
+
+      this.logger.error(
+        JSON.stringify({
+          event: 'request.failed',
+          type: exception.name,
+          code:
+            typeof code === 'string' && /^[A-Z0-9_]+$/.test(code)
+              ? code
+              : undefined,
+          frames: exception.stack
+            ?.split('\n')
+            .filter((line) => /^\s*at\s/.test(line))
+            .slice(0, 10),
+        }),
+      );
     }
 
     response.status(status).json({
