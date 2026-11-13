@@ -1,23 +1,40 @@
 # Dream Events
 
-An event administration application migrating to **React/TypeScript/Vite administration**, **NestJS/Prisma/PostgreSQL**, and an independent React mobile scanner. The existing Python/SQLite and Streamlit applications remain operational until verified parity and approved removal.
+An event administration application with React/TypeScript/Vite administration, a working NestJS/Prisma/PostgreSQL backend and an independent mobile scanner. The latest production target is **Vercel, NestJS on Cloud Run, Cloud SQL PostgreSQL, Firebase Authentication and Workspace/Gmail API**. Existing applications remain operational until verified parity and approved cutover.
 
 The interface keeps the established white/light-grey, navy and small gold accents. Regular Python 3.10 remains supported; **no virtual environment** is required.
 
 ## Active migration
 
-The latest request is [React admin and deployment](docs/REACT_ADMIN_SPEC.md), superseding Streamlit as the final admin frontend. See the [feature/API parity checklist](docs/REACT_ADMIN_PARITY.md), [deployment preparation](docs/DEPLOYMENT.md), [Node implementation record](docs/NODE_MIGRATION.md) and [session handoff](SESSION_HANDOFF.md).
+The controlling request is [production migration and deployment preparation](docs/PRODUCTION_MIGRATION_SPEC.md). Start with the [session handoff](SESSION_HANDOFF.md) and [feature/API parity checklist](docs/REACT_ADMIN_PARITY.md). The earlier [Firebase upgrade](docs/FIREBASE_UPGRADE_SPEC.md) remains a behavior reference; its Firestore/Functions final architecture is superseded.
 
-- `admin-web/`: React admin with real API sign-in, TOTP/recovery, password changes, event overview/CRUD/lifecycle/settings, categories/entrances, staff/access-code management, Students & Invitations, Tickets, and reusable Ticket Templates with previews.
-- `backend/`: Node authority with strict configuration/TLS/CORS validation, atomic ticket issuance and a durable Resend worker with ticket-delivery producers/history/retries and signed webhooks. Personal invitation links support private sharing and scoped guest registration/cancellation. Guest mobile ticket links, transfers, invitation-link email and authentication email flows remain pending.
+The optional Firebase sign-in bridge preserves existing password/MFA verification and checks the original live session on every API request. It defaults off. Opt-in native Firebase enrollment, verified-email login/reset and account linking now pass local API/mobile emulator checks; hosted rollout remains unverified and disabled. In development project `dream-team-bed27`, a verified Cloud SQL trial copy now contains 47 tables and 279 rows. Aiven remains the application database.
+
+- `admin-web/`: React admin with real API sign-in, TOTP/recovery, password changes, event overview/CRUD/lifecycle/settings, categories/entrances, staff/access-code management, Students & Invitations, independent attendees with CSV/XLSX import/matching/export, Tickets, reusable Ticket Templates, Announcements, event Reports and organization-wide Super Admin audit history.
+- `backend/`: Node authority with strict configuration/TLS/CORS validation, atomic ticket issuance and a durable email queue with Gmail API send-only transport, private notifications/PDFs, mailbox limits, retries and uncertainty handling. Retained Resend/SMTP jobs remain compatible until retirement is verified. Personal invitation links support private sharing and scoped guest registration/cancellation. Guest mobile ticket links and transfers are implemented, and the hosted Aiven test schema was confirmed at migration 11; their deployed behavior remains unverified. Invitation-link/registration/transfer/cancellation/announcement and verified-account security notifications queue locally. Firebase handles its own verification/reset mail; live Workspace/Firebase setup remains unverified.
 - `scanner/`: preserved independent camera scanner, now branded Dream Events; legacy QR identities and session storage keys remain compatible.
 - `admin/` and `app/dashboard/`: retained Streamlit applications. Backend gaps and unfinished React modules are explicitly tracked; full parity is **not complete**.
 
-Prepared targets are **Vercel** admin, **Render** API, **Aiven** database, **Resend** email and **Cloudflare** DNS. No deployment, production migration, DNS changes, SQLite cutover or live email sending has occurred. Domain/provider configuration and production changes require authorization.
+The production target is **Vercel admin/scanner + Cloud Run API + Cloud SQL**, with Firebase Authentication, Cloudflare DNS and Workspace/Gmail API outbound email. Resend and legacy applications remain until verified replacements permit removal. No hosted backend switch or automatic database failover has occurred.
+
+**Current checkpoint: development continues; deployment held.** Do not deploy Vercel, Cloud Run or production database resources until the user explicitly confirms both Google AI Pro/developer-credit availability and updated Google Cloud billing address/account readiness. This supersedes earlier hosting authorization. No billing upgrade, DNS change or live email is authorized now. The Aiven schema and trial copy have migration 11; new local migrations 12-15 remain unapplied to those hosts. Application cutover, provider/legacy retirement, Linux/container/load checks and the requested security audit are unfinished. See [production status](docs/PRODUCTION_STATUS.md), [setup](docs/PRODUCTION_SETUP.md), [costs](docs/PRODUCTION_COSTS.md) and [SESSION_HANDOFF.md](SESSION_HANDOFF.md). Local invitation forms support optional server-verified Turnstile after [provider setup](docs/FIREBASE_MIGRATION.md#optional-turnstile-for-personal-invitations).
+
+### Prepare the Firebase API
+
+Historical Functions packaging instructions follow; Cloud Run now replaces Functions as the production API host. Do not deploy this bundle under the current deployment hold.
+
+Firebase CLI 15.36.0 is installed globally in this workspace. The user linked Firebase Hosting site `dream-team-bed27`; the admin stays on Vercel. Build the existing API into an isolated deployment bundle:
+
+```powershell
+npm --prefix firebase ci
+npm --prefix firebase run build:functions
+```
+
+This creates ignored `firebase/functions/` from compiled code, assets and Prisma schema, excluding the backend's local `.env`, key and certificate files. Runtime secrets belong in Firebase Secret Manager. Follow [Firebase setup and validation](docs/FIREBASE_MIGRATION.md) before deployment or changing Vercel's API address. Firestore migration is separate from moving the API host.
 
 ### Personal invitation links
 
-Open **Students & Invitations**, select **Invitation link** beside an active student, enter a reason and confirm rotation. Copy the new private URL. Students can add/cancel only their own guests; quotas, custom fields and deadlines remain enforced. Tickets are distributed separately. See the [invitation checkpoint](docs/INVITATION_CHECKPOINT.md) for boundaries.
+Open **Students & Invitations**, select **Invitation link** beside an active student, enter a reason and confirm rotation. Copy the new private URL, or review the student recipient and opt into a queued private-link email when the provider is enabled. Students can add/cancel only their own guests; quotas, custom fields and deadlines remain enforced. Tickets are distributed separately. See the [invitation checkpoint](docs/INVITATION_CHECKPOINT.md) for boundaries.
 
 ### Run React administration locally
 
@@ -49,7 +66,7 @@ Open **Ticket templates** to create, duplicate, rename, edit, preview or delete 
 
 In **Event settings**, opt into automatic tickets for new manual/Excel guests in published/open events and choose direct guest delivery/student copies. Automatic imports are limited to 500 new guests. Draft/existing registrations use manual/group generation. When configured, generation queues private PDF emails; the separate Node worker sends with retries after 1, 5 and 15 minutes. **Tickets → Email delivery** shows status/issues and edits event email wording. Intentional resends require recipient review and a reason and reuse the QR. Guests without email fall back to their inviting student; Pending/Sending jobs are skipped. Sent means provider acceptance, not an inbox/read receipt. Check Unknown results before resending.
 
-Email remains disabled in the current local setup; no real attendee messages have been sent. Configure Resend privately and explicitly authorize live sending before starting `npm --prefix backend run worker:email`. Public invitation/mobile links, transfers, reports/operations and security email remain unfinished. See [delivery checkpoint](docs/DELIVERY_CHECKPOINT.md).
+Email remains disabled in the current local setup; no real attendee messages have been sent. Configure Resend or the optional TLS SMTP transport privately and explicitly authorize live sending before starting `npm --prefix backend run worker:email`. SMTP uses `EMAIL_PROVIDER=smtp`, verified `EMAIL_FROM`, server-only SMTP credentials and optional `EMAIL_REPLY_TO`; interrupted or ambiguous sends require review under Unknown. See [SMTP setup](docs/FIREBASE_MIGRATION.md#smtp-and-sender-setup) and the [delivery checkpoint](docs/DELIVERY_CHECKPOINT.md). Personal invitation/mobile links, transfers, announcements, cancellation and verified-account security notifications are implemented locally; hosted sending and provider retirement remain unverified. Use EMAIL_PROVIDER=gmail and the server-only OAuth setup in [production instructions](docs/PRODUCTION_SETUP.md#workspace-and-gmail-api); Firebase authentication mail is separate.
 
 The remaining sections below document the working **legacy Python application**. Its Gmail settings, seven-section interface and test commands are retained until parity and approved removal. They do not describe completed React replacements. Historical plans remain in `docs/UPGRADE_PLAN.md` and `docs/CHECKPOINT.md`.
 

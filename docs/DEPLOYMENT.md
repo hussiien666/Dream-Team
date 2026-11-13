@@ -1,5 +1,7 @@
 # Dream Events - deployment preparation
 
+**Current target (13 November 2026): Vercel admin + Firebase Cloud Functions API.** Follow [FIREBASE_MIGRATION.md](FIREBASE_MIGRATION.md) for the prepared Functions bundle, runtime secrets, emulator checks and exact setup. The Render/Aiven guidance below remains a reference for the working backend and rollback while Firestore parity is built. Aiven is still the current database; no live provider switch has occurred. The supplied published origins are `https://dream-team-peach.vercel.app` and `https://dream-team-scanner.vercel.app`; both returned HTTP 200 in a read-only homepage check.
+
 Nothing has been deployed, no provider resources/DNS have been created, and no production migrations or emails have run. These files are reviewable preparation. The application still has parity gaps listed in [REACT_ADMIN_PARITY.md](REACT_ADMIN_PARITY.md); do not remove Streamlit or cut over production yet.
 
 ## Targets and required information

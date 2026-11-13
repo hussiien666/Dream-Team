@@ -1,0 +1,71 @@
+# Production preparation - 13 November 2026
+
+Controlling request: [production specification](PRODUCTION_MIGRATION_SPEC.md). Work is ongoing, not ready for final approval. Do not deploy until the owner explicitly confirms both Google AI Pro/developer credits and the billing address/account. Existing admin, scanner and API remain on Vercel with Aiven authority. The Cloud SQL development copy has migration 11, 47 tables and 279 verified rows; new migrations 12-15 are local preparation only.
+
+## Runtime and database
+
+React admin and independent scanner build separately on Vercel. NestJS runs as a Cloud Run service in the same region as Cloud SQL (current trial: us-east4). Nest/Prisma accesses PostgreSQL directly; no SQL Connect client connector or extra Firestore database is needed. SQL Connect owns the trial resource, not application authorization. Review both latency from Egypt and region cost before an approved production change.
+
+`backend/Dockerfile` uses a multi-stage Node 22 Debian build, a non-root runtime, bundled ticket fonts and an explicit command. Its build context excludes environment files, private keys/certificates, local dependencies and test artifacts. It does not run migrations or copy the development environment. Docker is unavailable in this Windows session: image build/start and image vulnerability scanning remain unverified. Local production builds are a separate check, not an image test.
+
+Prepared manifests: `deploy/cloud-run/service.example.yaml` and `email-job.example.yaml`. Fill placeholders privately after final approval; pin the verified image digest and Secret Manager versions. Keep minimum API instances 0, maximum 3, concurrency 10 and PG_POOL_MAX=2 initially. A cold start is possible. Review memory/load with representative imports, PDF rendering and concurrent check-in before an event. Three API instances plus one job reserve up to eight database connections; revisions, overlapping jobs and other clients increase that total.
+
+Cloud Run must mount the exact Cloud SQL instance through the managed Auth Proxy. Runtime `NODE_DATABASE_URL` uses `postgresql://runtime-user:private-password@localhost/database` without URL options, and `CLOUD_SQL_CONNECTION_NAME=project:region:instance`. The application connects only to `/cloudsql/<exact instance>`. The proxy encrypts and verifies the remote database connection; ordinary TCP production connections continue to require verified TLS. Separate runtime database grants from migration-owner privileges. Do not use the operator's Firebase refresh credentials in the deployed app.
+
+API secrets: preserved APP_ENCRYPTION_KEY and NODE_DATABASE_URL. Additional runtime values: NODE_ENV=production, exact CORS_ORIGINS, PUBLIC_BASE_URL pointing to the frontend, TRUST_PROXY_HOPS reviewed for the actual proxy chain, PG_POOL_MAX, Firebase project/feature flags and optional Turnstile secrets. Use a dedicated service identity with Cloud SQL Client and per-secret access; Firebase Auth account administration/signing must be scoped and reviewed. No Owner/Editor grants to repair errors. Credentials stay out of VITE values and container layers.
+
+The email process is a bounded Cloud Run Job, not a background loop in the request-billed API. It processes at most 100 queue steps/240 seconds by default, with task count/parallelism 1 and platform retries 0. Database leases, mailbox reservations and Unknown handling remain authoritative. Start jobs only after explicit live-email approval. For unattended delivery, prepare one authenticated Cloud Scheduler trigger for the job's Run API, with a dedicated invoker service account. Do not create it now; evaluate its allowance/cost and choose an interval against real throughput. A manual job alone does not provide continuous production delivery.
+
+[Cloud Run runtime contract](https://cloud.google.com/run/docs/container-contract), [Cloud SQL connections](https://cloud.google.com/sql/docs/postgres/connect-run), [job execution](https://cloud.google.com/run/docs/execute/jobs).
+
+## Firebase Authentication transition
+
+Native enrollment is opt-in using backend FIREBASE_AUTH_NATIVE_ENABLED and frontend VITE_FIREBASE_AUTH_NATIVE (both false in current configuration). Existing administrators first sign in and complete their existing password/MFA gates, then enroll an email/password under Account security. Firebase sends its own verification email; only a recently signed-in, verified Firebase identity with that account's fixed UID can activate the binding. Activation revokes old app sessions and disables legacy password login for that account. Original Argon2 hashes remain preserved. Firebase password reset is the native credential-change path; existing authenticator/recovery requirements remain in PostgreSQL.
+
+The API verifies Firebase identity/revocation, creates a bounded database session and enforces the existing MFA, role, organization/event and idle-expiry rules. Each native session operation checks Firebase disablement and token-validity time. Public Firebase signup creates no organization membership or administrative access. Account creation remains administrator-controlled; student registration remains capability-scoped. Email verification/password-reset actions use Firebase's supported Auth emails, independent from Gmail API. The optional old custom-token bridge is a separate migration tool; leave it off for native rollout.
+
+Before native rollout, initialize Auth, enable email/password, configure the exact frontend authorized domains, customize supported Auth templates/action settings and enforce a minimum 12-character password policy. The app must not claim the policy is configured until verified in the project. No hosted Auth settings have been changed here. Argon2 is not a supported direct Firebase hash import in the documented import algorithms, so explicit enrollment avoids silently replacing or misinterpreting hashes. The interactive create-admin CLI accepts a linked administrator's Firebase email/password using the server public FIREBASE_WEB_API_KEY, then the existing MFA gate. The helper passes emulator success/wrong-password checks and the CLI rejects piped credentials; the full hosted interactive operator workflow remains unverified.
+
+[Firebase password authentication and policy](https://firebase.google.com/docs/auth/web/password-auth), [user management/email actions](https://firebase.google.com/docs/auth/web/manage-users), [supported hash import](https://firebase.google.com/docs/auth/admin/import-users).
+
+## Workspace and Gmail API
+
+Provision one Workspace mailbox after confirming the domain and subscription. No domain has been assumed purchased. The production transport is EMAIL_PROVIDER=gmail with EMAIL_ENABLED=false until sending is approved. EMAIL_FROM must match GMAIL_MAILBOX, e.g. `Dream Events <tickets@DOMAIN>`. Current code requires the mailbox itself; unverified aliases are refused. A personal login/password or app password is not used by this transport.
+
+Prepare an internal OAuth application for the Workspace organization, enable Gmail API, obtain consent for **only** `https://www.googleapis.com/auth/gmail.send` with offline access and store GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET and GMAIL_REFRESH_TOKEN in Secret Manager. Avoid external/testing consent tokens for production; their lifetime/verification rules differ. Administrator OAuth restrictions may need approval. No inbox, draft, mailbox-settings, history, watch or incoming-email scope is requested. Revocation/rotation must be tested without logging tokens. No real OAuth token or mailbox send has been tested here.
+
+Gmail receives private MIME messages, attachments and stable Message-IDs. Message-ID is review evidence, not a provider deduplication promise. Explicit temporary rate rejection can retry after its Retry-After; disconnects, malformed success and server errors after sending become Unknown. Expired in-flight Gmail/SMTP leases never auto-resend. Provider acceptance is Sent, not Delivered or Read. With send-only access, bounce/inbox reconciliation requires an operator; automated read/bounce processing is intentionally absent.
+
+Application queue deduplication, encrypted payloads, audits, transport pinning and ticket/current-recipient preflight remain. Distributed mailbox reservations count attempts, including uncertain sends, across all workers. Defaults: 20/minute and 400 per rolling day; these are conservative app limits, not provider entitlements. Confirm paid/trial account limits and other mailbox usage before increasing them. Invitations can be recipient-reviewed and queued during link rotation; revoked/expired links fail before sending. Announcements review up to 500 distinct active recipients, reject stale previews and preserve retry receipts/history. Event-cancellation notices expand in bounded durable batches. Keep Resend/SMTP code and queued records until every replacement flow is verified and a retirement plan handles old provider jobs.
+
+[Send API and scope](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send), [MIME messages](https://developers.google.com/workspace/gmail/api/guides/sending), [error handling](https://developers.google.com/workspace/gmail/api/guides/handle-errors), [Workspace limits](https://support.google.com/a/answer/166852).
+
+## Domains and Cloudflare
+
+Use DOMAIN, ADMIN_DOMAIN, SCANNER_DOMAIN and API_DOMAIN placeholders until the owner chooses a domain. Do not purchase one, alter registrar nameservers or publish records now.
+
+| Record | Prepared purpose | Exact value source |
+| --- | --- | --- |
+| admin/scanner CNAME (or apex records) | Vercel frontends | Each existing Vercel project's domain verification output |
+| API mapping | Cloud Run HTTPS | Supported region/domain-mapping verification and generated DNS records; use the run.app URL until verified |
+| TXT ownership | Workspace domain verification | Workspace administrator console |
+| TXT SPF at mail domain | Permit Workspace senders | One SPF record, normally `v=spf1 include:_spf.google.com ~all`; merge other authorized senders rather than publishing multiple SPF records |
+| TXT selector._domainkey | DKIM | Unique selector/public key generated in Workspace; enable signing after DNS verification |
+| TXT _dmarc | Alignment/reporting policy | Start with reviewed `v=DMARC1; p=none`; add reporting only to an address the owner operates, then tighten after alignment testing |
+| MX | Workspace mailbox operation | Exact current Workspace console values; DNS-only, never Cloudflare proxied |
+
+Gmail API has no incoming-mail handler; Workspace's mailbox can still require normal MX configuration. Do not provision an inbound webhook or grant read scope. Begin Vercel/Cloud Run verification records as DNS-only and use Full (strict) TLS if approved Cloudflare proxying is later enabled. Proxied custom domains alone do not protect public provider origins: backend auth, ownership, limits and optional Turnstile remain mandatory. No direct-origin WAF coverage is claimed. Domain mappings may have region/provider limitations; avoid adding a paid load balancer without approval.
+
+Use Cloudflare provider records only after the real service/domain verification output is available. Do not substitute guessed Vercel IPs or a generic DKIM key. [Workspace SPF](https://support.google.com/a/answer/106850), [DKIM](https://support.google.com/a/answer/174124), [DMARC](https://support.google.com/a/answer/2466580), [Cloud Run domains](https://cloud.google.com/run/docs/mapping-custom-domains).
+
+## Migration, recovery and remaining gates
+
+Keep Aiven and the verified encrypted backup/key until the target passes application invariants, load and concurrency tests. New local migrations are additive; they have not been applied to Aiven or the populated trial. At approved cutover, fence source writes, obtain/verify a fresh snapshot, restore into a separate empty production target and apply reviewed pending migrations under a migration identity. Verify original IDs, row hashes, schema/triggers, microsecond timestamps, encrypted ticket downloads, MFA, roles, imports, replay protection and all email retry receipts. Never overwrite the trial to make a restore rerun succeed.
+
+Rehearse recovery before opening writes: restore the protected pre-cutover source into an isolated database and verify it. Before any target writes, traffic can return to the still-fenced source. After target writes begin, returning to a stale Aiven copy needs a reviewed reverse replay/restore, not an automatic fallback. Keep a record of Vercel's old API settings and previous image revision. No destructive downgrade or automatic migration runs at container startup.
+
+Independent attendee CRUD/search/export, CSV/XLSX templates/imports, explicit column matching/upload defaults, announcements and organization-wide audit history are now implemented locally. Native Firebase API/mobile browser and Gmail producer/provider/queue checks use local emulators or mocked transports. Remaining gaps include the full interactive native CLI workflow, verified Linux container execution, hosted Workspace/Firebase policy/domain checks, production load, provider job retirement and the final comprehensive security audit. Therefore the two account confirmations are the final *deployment approval* gate, but they are not yet the only remaining work. External integrations that cannot be tested without account setup must remain explicitly unverified.
+
+## Security audit limitation
+
+Four source reconnaissance passes and a 97-unit coverage plan were prepared. The mandatory audit validators refuse this Windows platform: `OS no-follow and nonblocking input protection is unavailable`. Required OS-enforced target-execution isolation is also absent. The run is explicitly incomplete; no hunting, critic or independent vulnerability verification pass ran, and zero findings does not mean a clean review. Reports are retained outside the repository at `C:/Users/original/security-audit-skill/Events_Ticketing/run-1/`. Development regressions are not security-audit evidence. Resume in an environment satisfying [the skill requirements](C:/Users/original/.agents/skills/security-audit/SKILL.md); do not bypass its validator protections.
