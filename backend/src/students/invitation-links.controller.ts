@@ -15,6 +15,7 @@ import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import type { AuthenticatedRequest } from '../common/request.js';
 import { InvitationLinksService } from './invitation-links.service.js';
+import { TurnstileService } from './turnstile.js';
 
 @Controller('events/:eventId/students/:studentId/invitation-links')
 @UseGuards(JwtAuthGuard)
@@ -50,19 +51,21 @@ export class InvitationLinksController {
 @Controller('public/invitations')
 @Throttle({ default: { limit: 60, ttl: 60000 } })
 export class PublicInvitationsController {
-  constructor(private readonly service: InvitationLinksService) {}
+  constructor(private readonly service: InvitationLinksService, private readonly turnstile: TurnstileService) {}
   private token(header: string | undefined) {
     return header?.startsWith('Bearer ') ? header.slice(7) : '';
   }
-  @Get() @Header('Cache-Control', 'no-store') view(
+  @Get() @Header('Cache-Control', 'no-store') async view(
     @Headers('authorization') h: string | undefined,
   ) {
-    return this.service.view(this.token(h));
+    return { ...await this.service.view(this.token(h)), turnstile: this.turnstile.publicSettings() };
   }
-  @Post() @HttpCode(200) operate(
+  @Post() @HttpCode(200) async operate(
     @Headers('authorization') h: string | undefined,
+    @Headers('x-turnstile-token') challenge: string | undefined,
     @Body() b: unknown,
   ) {
+    await this.turnstile.verify(challenge);
     return this.service.operate(this.token(h), b);
   }
 }

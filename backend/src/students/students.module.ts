@@ -6,9 +6,11 @@ import { StudentsController } from './students.controller.js';
 import {TicketsModule} from '../tickets/tickets.module.js';
 import {InvitationLinksService} from './invitation-links.service.js';
 import {InvitationLinksController, PublicInvitationsController} from './invitation-links.controller.js';
+import { TurnstileService } from './turnstile.js';
+import { EmailModule } from '../email/email.module.js';
 @Module({
-  imports: [EventsModule, AuthModule, TicketsModule],
+  imports: [EventsModule, AuthModule, TicketsModule, EmailModule],
   controllers: [StudentsController, InvitationLinksController, PublicInvitationsController],
-  providers: [StudentsService, InvitationLinksService],
+  providers: [StudentsService, InvitationLinksService, TurnstileService],
 })
 export class StudentsModule {}

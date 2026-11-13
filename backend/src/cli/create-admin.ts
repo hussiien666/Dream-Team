@@ -7,6 +7,7 @@ import { stdin, stdout } from 'node:process';
 import { HttpException } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service.js';
 import { AuthService } from '../auth/auth.service.js';
+import { firebasePasswordToken } from '../auth/firebase-auth.js';
 import { UsersService } from '../users/users.service.js';
 import { digest } from '../common/crypto.util.js';
 import { seal, unseal } from '../common/encryption.util.js';
@@ -65,9 +66,11 @@ async function main() {
       'Accounts already exist. Verify an existing Super Admin before adding another account.',
     );
     auth = new AuthService(db);
-    const current = await ask('Existing Super Admin username: '),
+    const current = await ask('Existing Super Admin username or Firebase email: '),
       password = await ask('Existing password: ', true);
-    const login = await auth.login(current, password);
+    const login = current.includes('@')
+      ? await auth.loginFirebase(await firebasePasswordToken(current,password))
+      : await auth.login(current, password);
     sessionHash = digest(login.accessToken);
     if (login.identity.orgRole !== 'super_admin')
       throw new Error('An existing Super Admin is required.');

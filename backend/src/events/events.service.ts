@@ -12,6 +12,7 @@ import {
   EventConfigurationDto,
 } from './dto/create-event.dto.js';
 import { hasPermission } from '../common/guards/jwt-auth.guard.js';
+import { NotificationsService } from '../email/notifications.service.js';
 
 type Tx = Prisma.TransactionClient;
 const dateKeys = [
@@ -51,7 +52,7 @@ export function rejectNulls(value: object, allowed: string[] = []) {
 
 @Injectable()
 export class EventsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly notifications: NotificationsService) {}
 
   async findAll(userId: number, orgRole: string, orgId: number) {
     if (!hasPermission(orgRole, 'events.view'))
@@ -327,6 +328,8 @@ export class EventsService {
             details: `Cancelled unused tickets: ${cancelled.count}; used/revoked history retained`,
           },
         });
+        await this.notifications.broadcast(tx, id, userId, `${event.name}: event cancelled`,
+          `The event ${event.name} was cancelled on ${new Date().toISOString()}. Its unused tickets have been cancelled. Contact the event organizer for assistance.`, `event-cancelled:${id}:${Date.now()}`);
       },
       true,
     );
@@ -531,7 +534,9 @@ export class EventsService {
         });
         const config = {
           ...(saved ? JSON.parse(saved.value) : {}),
-          ...settings,
+          ...Object.fromEntries(
+            Object.entries(settings).filter(([, value]) => value !== undefined),
+          ),
         };
         if ((settings.guestLimit !== undefined || settings.perStudentLimit !== undefined) && await tx.guestInvitation.count({where:{eventId:id}})) throw new BadRequestException('Change invitation limits in Students & Invitations, where existing registrations and override reasons are checked.');
         if (

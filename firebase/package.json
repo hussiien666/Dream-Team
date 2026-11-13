@@ -1,0 +1,19 @@
+{
+  "name": "dream-events-firebase-validation",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:functions": "node build-functions.mjs",
+    "prepare:runtime": "node prepare-runtime.mjs",
+    "emulators": "firebase emulators:start --project demo-dream-events --only auth,firestore,storage",
+    "test:rules": "node test/run-emulators.mjs rules",
+    "test:auth": "node test/run-emulators.mjs auth",
+    "test:functions": "node test/run-emulators.mjs functions"
+  },
+  "overrides": { "@firebase/firestore": { "@grpc/grpc-js": "1.14.7" } },
+  "devDependencies": {
+    "firebase-tools": "15.36.0",
+    "@firebase/rules-unit-testing": "6.0.0",
+    "firebase": "13.3.0"
+  }
+}

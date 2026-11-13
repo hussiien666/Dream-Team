@@ -4,6 +4,14 @@ import {registerTemplateTests} from './templates.tests.mjs';
 import {registerInvitationLinkTests} from './invitation-links.tests.mjs';
 import {registerDeliveryTests} from './delivery.tests.mjs';
 import {registerMobileTicketTransferTests} from './mobile-tickets-transfers.tests.mjs';
+import {registerReportTests} from './reports.tests.mjs';
+import {registerFirebaseAuthTests} from './firebase-auth.tests.mjs';
+import {registerSmtpTests} from './smtp.tests.mjs';
+import {registerGmailTests} from './gmail.tests.mjs';
+import {registerFirebaseNativeTests} from './firebase-native.tests.mjs';
+import {registerCommunicationsTests} from './communications.tests.mjs';
+import {registerAttendeeTests} from './attendees.tests.mjs';
+import {registerTurnstileTests} from './turnstile.tests.mjs';
 import 'reflect-metadata';
 import {before, after, test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -57,7 +65,7 @@ before(async () => {
   app.useBodyParser('json',{limit:'1mb'});
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));
-  if(process.env.RUN_REACT_BROWSER==='true')app.enableCors({origin:/^http:\/\/127\.0\.0\.1:\d+$/,credentials:false});
+  if(process.env.RUN_REACT_BROWSER==='true'||process.env.RUN_FIREBASE_AUTH_TESTS==='true')app.enableCors({origin:/^http:\/\/127\.0\.0\.1:\d+$/,credentials:false});
   await app.listen(0,'127.0.0.1');
   origin = await app.getUrl();
   db=app.get(PrismaService); auth=app.get(AuthService);
@@ -579,7 +587,15 @@ registerTicketTests({test,adminRequest,request,getDb:()=>db,getOrigin:()=>origin
 registerTemplateTests({test,adminRequest,request,getDb:()=>db,getOrigin:()=>origin,verifiedLogin,getApp:()=>app,eventInput});
 registerDeliveryTests({test,adminRequest,request,getDb:()=>db,getOrigin:()=>origin,verifiedLogin,getApp:()=>app,eventInput});
 registerInvitationLinkTests({test,adminRequest,request,getDb:()=>db,eventInput});
-registerMobileTicketTransferTests({test,adminRequest,request,getDb:()=>db,getApp:()=>app,eventInput});
+registerMobileTicketTransferTests({test,adminRequest,request,getDb:()=>db,getApp:()=>app,getOrigin:()=>origin,eventInput});
+registerReportTests({test,adminRequest,getAuth:()=>auth,getDb:()=>db,getOrigin:()=>origin,verifiedLogin,eventInput});
+registerFirebaseAuthTests({test,request,verifiedLogin,getAuth:()=>auth,getDb:()=>db,getOrigin:()=>origin});
+registerFirebaseNativeTests({test,request,getAuth:()=>auth,getDb:()=>db,getOrigin:()=>origin});
+registerSmtpTests({test,getApp:()=>app,getDb:()=>db});
+registerGmailTests({test,getApp:()=>app,getDb:()=>db});
+registerTurnstileTests({test,adminRequest,getOrigin:()=>origin,getDb:()=>db,eventInput});
+registerCommunicationsTests({test,adminRequest,getDb:()=>db,getApp:()=>app,eventInput});
+registerAttendeeTests({test,adminRequest,verifiedLogin,getOrigin:()=>origin,getDb:()=>db,eventInput});
 
 if(process.env.RUN_REACT_BROWSER==='true')test('React administration works against the real API with 2FA, event/access forms and role isolation',async()=>{
   const {runAdminBrowser}=await import('./react-admin.browser.mjs');

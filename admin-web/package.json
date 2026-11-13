@@ -10,6 +10,7 @@
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
+    "firebase": "^13.3.0",
     "react": "19.2.0",
     "react-dom": "19.2.0"
   },
@@ -20,5 +21,6 @@
     "playwright-core": "1.65.0",
     "typescript": "6.0.2",
     "vite": "8.3.7"
-  }
+  },
+  "overrides": { "@firebase/firestore": { "@grpc/grpc-js": "1.14.7" } }
 }

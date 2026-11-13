@@ -1,32 +1,39 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import type { Client } from "./api";
+import { ApiError, type Client } from "./api";
 export const message = (e: unknown) =>
   e instanceof Error ? e.message : "The action could not be completed.";
 export function useResource<T>(api: Client, path: string) {
-  const [state, set] = useState<{ key: string; data?: T; error?: string }>({
-    key: "",
-  });
+  const [state, set] = useState<{
+    api: Client; key: string; data?: T; error?: string; refreshing: boolean;
+  }>();
   const [version, bump] = useState(0);
   const key = path + "@" + version;
   useEffect(() => {
     let active = true;
-    const abort = new AbortController();
+    const cached = api.peekResource<T>(path);
+    set({ api, key, data: cached?.data, refreshing: !cached?.fresh || version > 0 });
+    if (cached?.fresh && version === 0) return () => { active = false; };
     api
-      .request<T>(path, "GET", undefined, abort.signal)
+      .resource<T>(path, version > 0)
       .then((data) => {
-        if (active) set({ key, data });
+        if (active) set({ api, key, data, refreshing: false });
       })
       .catch((e) => {
-        if (active) set({ key, error: message(e) });
+        const denied = e instanceof ApiError && [401, 403].includes(e.status);
+        if (active) set({ api, key, data: denied ? undefined : cached?.data, error: message(e), refreshing: false });
       });
     return () => {
       active = false;
-      abort.abort();
     };
-  }, [api, key, path]);
+  }, [api, key, path, version]);
+  const cached = api.peekResource<T>(path);
+  const current = state?.api === api && state.key === key ? state : undefined;
+  const data = current ? current.data : cached?.data;
   return {
-    ...(state.key === key ? state : {}),
-    loading: state.key !== key,
+    data,
+    error: current?.error,
+    loading: data === undefined && current?.refreshing !== false,
+    refreshing: current?.refreshing ?? !cached?.fresh,
     reload: useCallback(() => bump((v) => v + 1), []),
   };
 }

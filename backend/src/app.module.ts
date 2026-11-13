@@ -19,6 +19,8 @@ import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter.js';
 import {ScannerModule} from './scanner/scanner.module.js';
+import {ReportsModule} from './reports/reports.module.js';
+import {CommunicationsModule} from './communications/communications.module.js';
 
 @Module({
   imports: [
@@ -41,6 +43,8 @@ import {ScannerModule} from './scanner/scanner.module.js';
     TicketsModule,
     ScannerModule,
     EmailModule,
+    ReportsModule,
+    CommunicationsModule,
   ],
   controllers: [AppController],
   providers: [AppService,

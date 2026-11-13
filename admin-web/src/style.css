@@ -5,3 +5,10 @@
 table{min-width:650px}.actions{min-width:220px}
 
 .auth.public-invitation{max-width:760px}
+
+/* Keep controls reachable under mobile browser chrome and display cutouts. */
+body{min-height:100dvh;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.shell{display:flex;min-height:100dvh}.shell>aside{flex:0 0 220px}.workspace{flex:1}
+dialog{max-height:calc(100dvh - 32px)}
+input,select,textarea{max-width:100%}.tabs{flex-wrap:wrap}
+@media(max-width:850px){.shell{flex-direction:column}.shell>aside{flex-basis:auto}.event-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))}.auth{width:min(100%,760px)}dialog{padding:18px}.account{flex-wrap:wrap}}

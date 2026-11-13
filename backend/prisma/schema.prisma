@@ -25,6 +25,7 @@ model User {
   scannerSession    ScannerSession?
   scannerPreference ScannerPreference?
   securityProfile   SecurityProfile?
+  firebaseIdentity FirebaseIdentity?
   recoveryCodes     RecoveryCode[]
   actionTokens      ActionToken[]
   permissionOverrides PermissionOverride[]
@@ -63,6 +64,7 @@ model Organization {
   eventAssignments   EventAssignment[]
   backgroundJobs     BackgroundJob[]
   ticketTemplates    TicketTemplate[]
+  auditScopes        AuditOrganizationScope[]
 
   @@map("organizations")
 }
@@ -137,8 +139,25 @@ model Event {
   importReceipts     RegistrationImport[]
   ticketTransfers    TicketTransfer[]
   publicTicketLinks  PublicTicketLink[]
+  communications EventCommunication[]
 
   @@map("events")
+}
+
+model EventCommunication {
+  id Int @id @default(autoincrement())
+  eventId Int @map("event_id")
+  actorId Int @map("actor_id")
+  kind String @db.VarChar(40)
+  requestKey String @map("request_key") @db.VarChar(80)
+  contentHash String @map("content_hash") @db.Char(64)
+  protectedResult String @map("protected_result") @db.Text
+  recipientCount Int @map("recipient_count")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  @@unique([eventId, kind, requestKey])
+  @@index([eventId, createdAt])
+  @@map("event_communications")
 }
 
 enum EventStatus {
@@ -459,10 +478,21 @@ model AuditLog {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
 
   actor AccountIdentity? @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  organizationScope AuditOrganizationScope?
 
   @@index([eventId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model AuditOrganizationScope {
+  auditLogId     Int @id @map("audit_log_id")
+  organizationId Int @map("organization_id")
+  auditLog       AuditLog @relation(fields: [auditLogId], references: [id], onDelete: Restrict)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, auditLogId])
+  @@map("audit_organization_scopes")
 }
 
 model EventSetting {
@@ -523,6 +553,8 @@ model SecurityProfile {
 }
 
 model SecuritySession {
+  firebaseUid       String? @map("firebase_uid") @db.VarChar(128)
+  firebaseAuthTime  Int? @map("firebase_auth_time")
   tokenHash          String   @id @db.VarChar(64) @map("token_hash")
   lastSeen           DateTime @default(now()) @map("last_seen") @db.Timestamp(6)
   verified           Boolean  @default(false)
@@ -532,6 +564,16 @@ model SecuritySession {
   authSession AuthSession @relation(fields: [tokenHash], references: [tokenHash], onDelete: Cascade)
 
   @@map("security_sessions")
+}
+
+model FirebaseIdentity {
+  userId Int @id @map("user_id")
+  uid String @unique @db.VarChar(128)
+  email String @db.VarChar(254)
+  linkedAt DateTime? @map("linked_at") @db.Timestamp(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  @@map("firebase_identities")
 }
 
 model RecoveryCode {
@@ -659,6 +701,7 @@ model ScanAttempt {
 }
 
 model BackgroundJob {
+  sendAttempts MailSendAttempt[]
   mailDelivery MailDelivery?
   ticketDispatch TicketDispatch?
   ticketNotice TicketMailNotice?
@@ -684,6 +727,17 @@ model BackgroundJob {
   @@index([eventId])
   @@index([status, availableAt])
   @@map("background_jobs")
+}
+
+// Reservations count attempts, including uncertain outcomes, against send-only quotas.
+model MailSendAttempt {
+  id Int @id @default(autoincrement())
+  jobId Int @map("job_id")
+  mailboxHash String @map("mailbox_hash") @db.Char(64)
+  reservedAt DateTime @default(now()) @map("reserved_at") @db.Timestamp(6)
+  job BackgroundJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  @@index([mailboxHash, reservedAt])
+  @@map("mail_send_attempts")
 }
 
 enum JobStatus {

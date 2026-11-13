@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { PrismaService } from '../database/prisma.service.js';
 import { EventsService } from '../events/events.service.js';
 import { DeliveryService } from './delivery.service.js';
+import { NotificationsService } from '../email/notifications.service.js';
 import { TicketsService } from './tickets.service.js';
 import { newToken, digest } from '../common/crypto.util.js';
 import { seal } from '../common/encryption.util.js';
@@ -63,6 +64,7 @@ export class TransfersService {
     private readonly events: EventsService,
     private readonly tickets: TicketsService,
     private readonly delivery: DeliveryService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async list(
@@ -216,6 +218,8 @@ export class TransfersService {
           },
         });
 
+        await this.notifications.event(tx,eventId,userId,await this.notifications.attendeeRecipients(tx,ticket.attendeeId),
+          'Dream Events transfer awaiting approval','A ticket transfer was requested and is awaiting event administrator approval.',`transfer-pending:${transfer.id}`);
         return { transferId: transfer.id, status: 'Pending' };
       },
       true,
@@ -360,6 +364,8 @@ export class TransfersService {
           },
         });
 
+        await this.notifications.event(tx,eventId,userId,await this.notifications.attendeeRecipients(tx,transfer.fromAttendeeId),
+          'Dream Events transfer rejected','Your ticket transfer request was rejected. Review its status or contact the organizer.',`transfer-rejected:${transfer.id}`);
         return { id: transfer.id, status: 'Rejected' };
       },
       true,
@@ -492,7 +498,7 @@ export class TransfersService {
 
     // 7. Create new PublicTicketLink capability for new ticket
     const newMobileToken = newToken();
-    await tx.publicTicketLink.create({
+    const newMobileLink = await tx.publicTicketLink.create({
       data: {
         eventId: event.id,
         ticketId: newTicket.id,
@@ -562,12 +568,23 @@ export class TransfersService {
     });
 
     // 10. Queue delivery if configured
+    await this.notifications.event(tx, event.id, actorId, await this.notifications.attendeeRecipients(tx,fromAttendee.id), `${event.name}: ticket transferred`,
+      `Ticket ${oldTicket.number} has been transferred and its old QR is invalid.`, `transfer-old:${transferId}`);
+    if (recipient.email && this.notifications.enabled()) await this.notifications.event(tx, event.id, actorId, [recipient.email], `${event.name}: your transferred ticket`,
+      `Your ticket is available privately:\n${this.notifications.publicUrl('/ticket#DEM1.' + newMobileToken.raw)}\nDo not share the link publicly.`, `transfer-new:${transferId}`,
+      { kind: 'ticket', id: newMobileLink.id, tokenHash: newMobileLink.tokenHash });
+    // Optional PDF delivery may fail without undoing the transfer/private mobile
+    // link. Recover its writes and PostgreSQL error state before committing.
+    await tx.$executeRawUnsafe('SAVEPOINT transfer_pdf_delivery');
     try {
-      const org = await tx.organizationEvent.findFirst({ where: { eventId: event.id } });
-      const orgId = org?.organizationId ?? 1;
-      await this.delivery.queue(tx, newTicket, actorId, orgId, 'transfer:' + newTicket.id);
+      const org = await tx.organizationEvent.findUniqueOrThrow({ where: { eventId: event.id } });
+      await this.delivery.queue(tx, newTicket, actorId, org.organizationId, 'transfer:' + newTicket.id);
+      await tx.$executeRawUnsafe('RELEASE SAVEPOINT transfer_pdf_delivery');
     } catch {
-      // Opt-in delivery failures do not block transferable issuance
+      await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT transfer_pdf_delivery');
+      await tx.$executeRawUnsafe('RELEASE SAVEPOINT transfer_pdf_delivery');
+      await tx.auditLog.create({data:{eventId:event.id,actorId,action:'ticket.transfer_pdf_email_not_queued',
+        details:`Ticket ${newTicket.id}; private mobile link remains available; review delivery before resending`}});
     }
 
     return {

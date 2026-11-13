@@ -26,6 +26,7 @@ import type { Field } from './validation.js';
 import { readWorkbook, makeTemplate } from './workbook.js';
 import type { RowError } from './workbook.js';
 import {TicketsService} from '../tickets/tickets.service.js';
+import { NotificationsService } from '../email/notifications.service.js';
 type Tx = Prisma.TransactionClient;
 type Actor = Pick<AuthenticatedRequest, 'user' | 'orgRole' | 'orgId'>;
 type PublicPrincipal = { linkId: number; orgId: number };
@@ -59,6 +60,7 @@ export class StudentsService {
     private readonly db: PrismaService,
     private readonly events: EventsService,
     private readonly tickets:TicketsService,
+    private readonly notifications: NotificationsService,
   ) {}
   private access(
     eventId: number,
@@ -683,6 +685,11 @@ export class StudentsService {
       const ids=plan.guests.filter(g=>g.isNew).map(g=>g.attendeeId);
       if(ids.length)await this.tickets.issueInside(tx,event,ids,'linkId' in a ? null : a.user.id,a.orgId,'auto_'+hash(ids));
     }
+    if (this.notifications.enabled()) for (const g of plan.guests.filter(g => g.isNew)) {
+      const saved = await tx.guestInvitation.findUniqueOrThrow({ where: { id: g.id }, include: { student: true } });
+      await this.notifications.event(tx, event.id, 'linkId' in a ? null : a.user.id, [saved.email, saved.student.email],
+        `${event.name}: guest registration saved`, `Your guest registration has been saved. Tickets are distributed separately under event rules.`, `guest-created:${g.id}`);
+    }
   }
   async addFromInvitation(tx: Tx, event: Event, link: { id: number; studentId: number }, body: unknown) {
     const dto = parse(guestSchema.omit({ studentId: true, overrideReason: true, invitationGroup: true }), body);
@@ -765,6 +772,8 @@ export class StudentsService {
         guestCount: guests.length,
         reason: dto.reason,
       });
+      for (const g of guests) await this.notifications.event(tx,eventId,a.user.id,await this.notifications.attendeeRecipients(tx,g.attendeeId),
+        'Dream Events registration cancelled','Your guest registration has been cancelled. Any unused tickets for it are invalid.',`registration-cancelled:${g.id}`);
       return { cancelled: true, guestCount: guests.length };
     });
   }

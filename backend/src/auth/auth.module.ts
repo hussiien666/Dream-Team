@@ -5,9 +5,11 @@ import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import { Reflector } from '@nestjs/core';
+import { EmailModule } from '../email/email.module.js';
 
 @Module({
   imports: [
+    EmailModule,
     PassportModule,
     JwtModule.register({
       // Opaque revocable sessions are the authority; no default JWT secret.

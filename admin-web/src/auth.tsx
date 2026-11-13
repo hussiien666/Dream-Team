@@ -16,6 +16,9 @@ export function AuthScreen({
   signedOut: () => void;
 }) {
   const a = useAction();
+  const native = import.meta.env.VITE_FIREBASE_AUTH_NATIVE === "true";
+  const [loginName, setLoginName] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
   const [enrollment, setEnrollment] = useState<{
     secret: string;
     qrPng: string;
@@ -41,6 +44,7 @@ export function AuthScreen({
               : "Verify your account"}
         </h1>
         <Notice error={a.error} />
+        {authMessage && <p role="status">{authMessage}</p>}
         {codes ? (
           <>
             <p>Save these recovery codes privately. Each code works once.</p>
@@ -59,20 +63,24 @@ export function AuthScreen({
           <form
             onSubmit={(e) =>
               submit(e, async (d) => {
+                const name = String(d.get("username") ?? "");
+                const nativeToken = native && name.includes("@") ? await (await import("./firebase-auth")).nativeFirebaseSignIn(name, String(d.get("password"))) : null;
                 const result = await api.request<{ accessToken: string }>(
-                  "auth/login",
+                  nativeToken ? "auth/firebase-login" : "auth/login",
                   "POST",
-                  { username: d.get("username"), password: d.get("password") },
+                  nativeToken ? { idToken: nativeToken.idToken } : { username: name, password: d.get("password") },
                 );
                 onToken(result.accessToken);
               })
             }
           >
-            <Field label="Username">
+            <Field label={native ? "Email or legacy username" : "Username"}>
               <input
                 name="username"
                 autoComplete="username"
-                maxLength={80}
+                maxLength={native ? 254 : 80}
+                value={loginName}
+                onChange={e => setLoginName(e.target.value)}
                 required
               />
             </Field>
@@ -88,6 +96,10 @@ export function AuthScreen({
             <button className="primary" disabled={a.busy}>
               {a.busy ? "Signing in..." : "Sign in"}
             </button>
+            {native && <button type="button" disabled={a.busy || !loginName.includes("@")} onClick={() => void a.run(async () => {
+              await (await import("./firebase-auth")).resetFirebasePassword(loginName);
+              setAuthMessage("If this email is registered, Firebase will send password reset instructions.");
+            })}>Forgot password</button>}
           </form>
         ) : identity.requiresPasswordChange ? (
           <form

@@ -4,18 +4,14 @@ import React, {
   useMemo,
   useState,
   useRef,
+  lazy,
+  Suspense,
 } from "react";
 import { createRoot } from "react-dom/client";
 import { Client } from "./api";
 import type { EventRecord, Identity } from "./types";
 import { AuthScreen } from "./auth";
-import { EventsPage, Dashboard, EventSettings } from "./events";
-import { AccessPage } from "./access";
-import { StudentsPage } from "./students";
-import { PublicInvitationPage } from "./invitations";
-import { MobileTicketPage } from "./mobile-ticket";
-import { TicketsPage } from "./tickets";
-import { TemplatesPage } from "./templates";
+import { FirebaseEnrollment } from "./firebase-enrollment";
 import {
   Confirm,
   Field,
@@ -28,6 +24,19 @@ import {
   navigate,
 } from "./ui";
 import "./style.css";
+const EventsPage = lazy(() => import("./events").then(m => ({ default: m.EventsPage })));
+const Dashboard = lazy(() => import("./events").then(m => ({ default: m.Dashboard })));
+const EventSettings = lazy(() => import("./events").then(m => ({ default: m.EventSettings })));
+const AccessPage = lazy(() => import("./access").then(m => ({ default: m.AccessPage })));
+const StudentsPage = lazy(() => import("./students").then(m => ({ default: m.StudentsPage })));
+const TicketsPage = lazy(() => import("./tickets").then(m => ({ default: m.TicketsPage })));
+const TemplatesPage = lazy(() => import("./templates").then(m => ({ default: m.TemplatesPage })));
+const ReportsPage = lazy(() => import("./reports").then(m => ({ default: m.ReportsPage })));
+const Announcements = lazy(() => import("./announcements").then(m => ({ default: m.Announcements })));
+const Attendees = lazy(() => import("./attendees").then(m => ({ default: m.Attendees })));
+const OrganizationAudit = lazy(() => import("./organization-audit").then(m => ({ default: m.OrganizationAudit })));
+const PublicInvitationPage = lazy(() => import("./invitations").then(m => ({ default: m.PublicInvitationPage })));
+const MobileTicketPage = lazy(() => import("./mobile-ticket").then(m => ({ default: m.MobileTicketPage })));
 const tokenKey = "dream-events-admin-token";
 function Account({
   api,
@@ -48,7 +57,8 @@ function Account({
         {identity.user.displayName} ({identity.user.username})
       </p>
       <Notice error={a.error} />
-      <section className="plain-section">
+      <FirebaseEnrollment api={api} identity={identity} logout={logout} />
+      {identity.authProvider !== "firebase" && <section className="plain-section">
         <h2>Change password</h2>
         <form
           className="settings-form"
@@ -98,7 +108,7 @@ function Account({
             Save and sign in again
           </button>
         </form>
-      </section>
+      </section>}
       {identity.role === "super_admin" && (
         <section className="plain-section">
           <h2>Recovery codes</h2>
@@ -156,7 +166,7 @@ function Workspace({
     return () => removeEventListener("popstate", on);
   }, []);
   const match = path.match(
-    /^\/events\/(\d+)\/(dashboard|settings|access|students|tickets|templates)\/?$/,
+    /^\/events\/(\d+)\/(dashboard|settings|access|students|tickets|templates|reports|announcements|attendees)\/?$/,
   );
   const requested = match ? Number(match[1]) : selected;
   const event =
@@ -180,17 +190,22 @@ function Workspace({
             <>
               {link("Event dashboard", `/events/${event.id}/dashboard`)}
               {link("Event settings", `/events/${event.id}/settings`)}
+              {identity.permissions.includes("events.manage") && link("Announcements", `/events/${event.id}/announcements`)}
               {identity.permissions.includes("attendees.manage") &&
                 link("Students & Invitations", `/events/${event.id}/students`)}
+              {identity.permissions.includes("attendees.manage") && link("Independent attendees", `/events/${event.id}/attendees`)}
               {identity.permissions.includes("tickets.manage") &&
                 link("Tickets", `/events/${event.id}/tickets`)}
               {identity.permissions.includes("tickets.manage") &&
                 link("Ticket templates", `/events/${event.id}/templates`)}
               {identity.permissions.includes("access.manage") &&
                 link("Entrances & staff", `/events/${event.id}/access`)}
+              {identity.permissions.includes("reports.view") &&
+                link("Reports", `/events/${event.id}/reports`)}
             </>
           )}
           {link("Account security", "/account")}
+          {identity.role === "super_admin" && link("Audit history", "/audit")}
         </nav>
         <div className="account">
           <strong>{identity.user.displayName}</strong>
@@ -201,6 +216,7 @@ function Workspace({
       <div className="workspace">
         <header className="topbar">
           <span>Administration</span>
+          {events.data && events.refreshing && <span role="status">Refreshing events…</span>}
           {!!events.data?.length && (
             <label>
               Selected event
@@ -226,7 +242,9 @@ function Workspace({
         </header>
         <main className="content">
           <Notice error={events.error} />
-          {path === "/account" ? (
+          {path === "/audit" ? (
+            identity.role === "super_admin" ? <OrganizationAudit api={api}/> : <Empty>You do not have access to this section.</Empty>
+          ) : path === "/account" ? (
             <Account api={api} identity={identity} logout={logout} />
           ) : path === "/" || path === "/events" || path === "/events/" ? (
             <EventsPage api={api} identity={identity} refresh={events.reload} />
@@ -246,6 +264,16 @@ function Workspace({
             ) : match[2] === "templates" ? (
               identity.permissions.includes("tickets.manage") ? (
                 <TemplatesPage key={event.id} api={api} event={event} />
+              ) : (
+                <Empty>You do not have access to this section.</Empty>
+              )
+            ) : match[2] === "attendees" ? (
+              identity.permissions.includes("attendees.manage") ? <Attendees key={event.id} api={api} event={event} /> : <Empty>You do not have access to this section.</Empty>
+            ) : match[2] === "announcements" ? (
+              identity.permissions.includes("events.manage") ? <Announcements key={event.id} api={api} event={event} /> : <Empty>You do not have access to this section.</Empty>
+            ) : match[2] === "reports" ? (
+              identity.permissions.includes("reports.view") ? (
+                <ReportsPage key={event.id} api={api} event={event} identity={identity} />
               ) : (
                 <Empty>You do not have access to this section.</Empty>
               )
@@ -315,8 +343,13 @@ function App() {
     [error, setError] = useState(""),
     [loading, setLoading] = useState(false);
   const currentToken = useRef(token);
+  const currentClient = useRef<Client | undefined>(undefined);
+  const firebaseDispose = useRef<(() => Promise<void>) | undefined>(undefined);
   currentToken.current = token;
   const signedOut = useCallback(() => {
+    currentClient.current?.clearResources();
+    void firebaseDispose.current?.();
+    firebaseDispose.current = undefined;
     currentToken.current = "";
     setLoading(false);
     sessionStorage.removeItem(tokenKey);
@@ -334,12 +367,28 @@ function App() {
       }),
     [token, signedOut],
   );
+  currentClient.current = api;
+  useEffect(() => () => api.clearResources(), [api]);
   const reload = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const result = await api.request<Identity>("auth/me");
-      if (currentToken.current === token) setIdentity(result);
+      if (import.meta.env.VITE_FIREBASE_AUTH_BRIDGE === "true" &&
+          !result.requiresFactor && !result.requiresPasswordChange) {
+        const transition = await api.request<{ customToken: string; projectId: string }>("auth/firebase-exchange", "POST");
+        if (currentToken.current !== token) return;
+        const { exchangeFirebase } = await import("./firebase-auth");
+        const firebase = await exchangeFirebase(transition.customToken, transition.projectId);
+        if (currentToken.current !== token) { await firebase.dispose(); return; }
+        firebaseDispose.current = firebase.dispose;
+        api.setBearerProvider(firebase.bearer);
+      }
+      if (currentToken.current === token) {
+        // A live permission/organization change invalidates every private view.
+        api.clearResources();
+        setIdentity(result);
+      }
     } catch (e) {
       if (currentToken.current === token)
         setError(
@@ -387,7 +436,7 @@ function App() {
         />
       </>
     );
-  return <Workspace api={api} identity={identity} logout={signedOut} />;
+  return <Workspace key={JSON.stringify([identity.user.id, identity.organizationId, identity.role, identity.permissions])} api={api} identity={identity} logout={signedOut} />;
 }
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -414,6 +463,7 @@ class ErrorBoundary extends React.Component<
 }
 createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>
+    <Suspense fallback={<main className="auth"><Loading /></main>}>
     {location.pathname === "/invitation" ? (
       <PublicInvitationPage />
     ) : location.pathname === "/ticket" ? (
@@ -421,5 +471,6 @@ createRoot(document.getElementById("root")!).render(
     ) : (
       <App />
     )}
+    </Suspense>
   </ErrorBoundary>,
 );

@@ -6,6 +6,8 @@ export type Identity = {
   requiresFactor: boolean;
   requiresPasswordChange: boolean;
   enrolled: boolean;
+  authProvider?: "legacy" | "firebase";
+  email?: string;
 };
 export type EventRecord = {
   id: number;

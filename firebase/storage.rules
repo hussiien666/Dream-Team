@@ -1,0 +1,7 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Ticket files and migration backups must never become public downloads.
+    match /{path=**} { allow read, write: if false; }
+  }
+}

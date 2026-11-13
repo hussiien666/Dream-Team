@@ -17,6 +17,7 @@ import { generateQrPng } from './ticket-engine/qr.util.js';
 import { generatePdfTicket } from './ticket-engine/pdf.util.js';
 import { eventDesign } from './ticket-engine/design.js';
 import { text, phone, email, values, reason, parse, hash } from '../students/validation.js';
+import { NotificationsService } from '../email/notifications.service.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -58,6 +59,7 @@ export class MobileTicketsService {
     private readonly events: EventsService,
     private readonly tickets: TicketsService,
     private readonly transfers: TransfersService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async list(eventId: number, ticketId: number, r: AuthenticatedRequest) {
@@ -347,9 +349,27 @@ export class MobileTicketsService {
     });
   }
 
+  private async completedOperation(token: string, requestKey: string, contentHash: string) {
+    if (!/^DEM1\.[A-Za-z0-9_-]{43}$/.test(token)) return undefined;
+    const link = await this.db.publicTicketLink.findUnique({
+      where: { tokenHash: digest(token) },
+      select: { id: true },
+    });
+    if (!link) return undefined;
+    const old = await this.db.publicTicketOperation.findUnique({
+      where: { linkId_requestKey: { linkId: link.id, requestKey } },
+    });
+    if (!old) return undefined;
+    if (old.contentHash !== contentHash) {
+      throw new ConflictException('This request key belongs to another operation.');
+    }
+    return old.result;
+  }
+
   async transfer(token: string, body: unknown) {
     const dto = parse(guestTransferSchema, body);
-    return this.capability(token, async (tx, event, link, ticket) => {
+    try {
+      return await this.capability(token, async (tx, event, link, ticket) => {
       const contentHash = hash(dto);
       const old = await tx.publicTicketOperation.findUnique({
         where: { linkId_requestKey: { linkId: link.id, requestKey: dto.requestKey } },
@@ -444,6 +464,8 @@ export class MobileTicketsService {
             }),
           },
         });
+        await this.notifications.event(tx,event.id,null,await this.notifications.attendeeRecipients(tx,ticket.attendeeId),
+          `${event.name}: transfer awaiting approval`,'Your ticket transfer request is awaiting event administrator approval.',`transfer-pending:${transfer.id}`);
         result = { action: 'transfer_requested', status: 'Pending', transferId: transfer.id };
       }
 
@@ -457,7 +479,16 @@ export class MobileTicketsService {
       });
 
       return result;
-    });
+      });
+    } catch (e) {
+      // The first successful transfer revokes this link. Return its committed
+      // receipt for a matching retry, including one racing that transaction.
+      if (e instanceof UnauthorizedException) {
+        const old = await this.completedOperation(token, dto.requestKey, hash(dto));
+        if (old !== undefined) return old;
+      }
+      throw e;
+    }
   }
 
   async cancelTransfer(token: string) {
@@ -486,13 +517,16 @@ export class MobileTicketsService {
         },
       });
 
+      await this.notifications.event(tx,event.id,null,await this.notifications.attendeeRecipients(tx,ticket.attendeeId),
+        `${event.name}: transfer request cancelled`,'Your pending ticket transfer request was cancelled. Its original ticket remains valid under the event rules.',`transfer-cancelled:${transfer.id}`);
       return { action: 'transfer_cancelled' };
     });
   }
 
   async cancelTicket(token: string, body: unknown) {
     const dto = parse(guestCancelSchema, body);
-    return this.capability(token, async (tx, event, link, ticket) => {
+    try {
+      return await this.capability(token, async (tx, event, link, ticket) => {
       const contentHash = hash(dto);
       const old = await tx.publicTicketOperation.findUnique({
         where: { linkId_requestKey: { linkId: link.id, requestKey: dto.requestKey } },
@@ -560,6 +594,9 @@ export class MobileTicketsService {
       });
 
       const result = { action: 'cancelled' };
+      const guestRecipient = await tx.guestInvitation.findUnique({ where: { attendeeId: ticket.attendeeId }, include: { student: true } });
+      await this.notifications.event(tx, event.id, null, [ticket.attendee.email, guestRecipient?.email, guestRecipient?.student.email], `${event.name}: ticket cancelled`,
+        `Ticket ${ticket.number} is cancelled. Its QR can no longer admit a guest.`, `ticket-cancelled:${ticket.id}`);
       await tx.publicTicketOperation.create({
         data: {
           linkId: link.id,
@@ -570,6 +607,13 @@ export class MobileTicketsService {
       });
 
       return result;
-    });
+      });
+    } catch (e) {
+      if (e instanceof UnauthorizedException) {
+        const old = await this.completedOperation(token, dto.requestKey, hash(dto));
+        if (old !== undefined) return old;
+      }
+      throw e;
+    }
   }
 }

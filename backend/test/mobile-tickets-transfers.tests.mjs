@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/common/crypto.util.js';
 import { unseal } from '../dist/common/encryption.util.js';
 import { ScannerService } from '../dist/scanner/scanner.service.js';
+import { UsersService } from '../dist/users/users.service.js';
 
 export function registerMobileTicketTransferTests({
   test,
@@ -10,6 +11,7 @@ export function registerMobileTicketTransferTests({
   request,
   getDb: db,
   getApp: app,
+  getOrigin,
   eventInput,
 }) {
   const ok = (r, status = 201) => {
@@ -48,7 +50,7 @@ export function registerMobileTicketTransferTests({
         body: { name: 'Gate 1', code: 'GATE1', categoryIds: [c.id] },
       }),
     );
-    ok(
+    const updatedSettings = ok(
       await api(base() + '/settings', {
         method: 'PATCH',
         body: {
@@ -62,6 +64,7 @@ export function registerMobileTicketTransferTests({
       }),
       200,
     );
+    assert.equal(updatedSettings.settings.automaticTicketGeneration, true);
     s = ok(
       await api(base() + '/students', {
         body: {
@@ -85,14 +88,16 @@ export function registerMobileTicketTransferTests({
 
     // Ticket was automatically issued due to automaticTicketGeneration
     const tickets = ok(await api(base() + '/tickets'), 200);
+    g.attendeeId = (await db().guestInvitation.findUniqueOrThrow({ where: { id: g.id } })).attendeeId;
     t = tickets.find((row) => row.attendeeId === g.attendeeId);
     assert.ok(t, 'Automatic ticket should exist');
     assert.equal(t.status, 'Active');
 
     // Create an access code and scanner session for entrance verification
+    await app().get(UsersService).assignEvent(2, e.id, true, 1, 1, 'super_admin');
     const code = ok(
       await api(base() + '/access-codes', {
-        body: { name: 'Gate Scanner Code', entranceIds: [ent.id] },
+        body: { name: 'Gate Scanner Code', entranceIds: [ent.id], staffIds: [2] },
       }),
     );
     const scanner = app().get(ScannerService);
@@ -127,15 +132,18 @@ export function registerMobileTicketTransferTests({
     assert.equal(view.ticket.status, 'Active');
     assert.equal(view.attendee.fullName, 'Original Guest Attendee');
     assert.equal(view.studentName, 'Sponsoring Student');
-    assert.equal(view.categoryName, 'VIP Guest');
+    assert.equal(view.ticket.categoryName, 'VIP Guest');
     assert.ok(view.qrDataUri?.startsWith('data:image/png;base64,'));
     assert.equal(view.transfer.allowed, true);
     assert.equal(view.canCancel, true);
 
     // Download PDF via capability
-    const pdfRes = await call('pdf');
+    const pdfRes = await fetch(getOrigin() + '/api/v1/public/tickets/pdf', {
+      headers: { Authorization: 'Bearer ' + mobileToken },
+    });
     assert.equal(pdfRes.status, 200);
-    assert.ok(pdfRes.body !== null);
+    assert.equal(pdfRes.headers.get('content-type'), 'application/pdf');
+    assert.ok(Buffer.from(await pdfRes.arrayBuffer()).subarray(0, 4).equals(Buffer.from('%PDF')));
 
     // Invalid / unauthenticated capability tokens rejected
     assert.equal((await request('public/tickets')).status, 401);
@@ -205,15 +213,12 @@ export function registerMobileTicketTransferTests({
     });
     assert.equal(oldGuest.active, false);
 
-    // Old mobile link now reflects cancelled status
-    const oldView = ok(await call(''), 200);
-    assert.equal(oldView.ticket.status, 'Cancelled');
-    assert.equal(oldView.qrDataUri, null);
-    assert.equal(oldView.transfer.allowed, false);
-    assert.equal(oldView.canCancel, false);
+    // A transferred ticket's old private link no longer grants access.
+    assert.equal((await call('')).status, 401);
 
     // Scanner behavior:
     const scanner = app().get(ScannerService);
+    await scanner.switchEntrance(scannerToken, ent.id);
     const oldCred = await db().ticketCredential.findUnique({ where: { ticketId: t.id } });
     const oldQr = 'AAST1.' + unseal(oldCred.protectedToken);
     const oldScan = await scanner.scan(scannerToken, oldQr);
@@ -244,11 +249,12 @@ export function registerMobileTicketTransferTests({
       }),
     );
     const tickets = ok(await api(base() + '/tickets'), 200);
+    g2.attendeeId = (await db().guestInvitation.findUniqueOrThrow({ where: { id: g2.id } })).attendeeId;
     const t2 = tickets.find((row) => row.attendeeId === g2.attendeeId);
     assert.ok(t2);
 
-    // Switch event setting to require admin approval
-    ok(
+    // Switching approval mode must preserve automatic issuance and limits.
+    const approvalSettings = ok(
       await api(base() + '/settings', {
         method: 'PATCH',
         body: {
@@ -259,6 +265,8 @@ export function registerMobileTicketTransferTests({
       }),
       200,
     );
+    assert.equal(approvalSettings.settings.automaticTicketGeneration, true);
+    assert.equal(approvalSettings.settings.perStudentLimit, 5);
 
     // Get a mobile ticket link for t2
     const rotated = ok(
@@ -314,7 +322,7 @@ export function registerMobileTicketTransferTests({
     assert.equal(scanAttempt.message, 'Ticket transfer is pending approval.');
 
     // Guest cancels transfer request
-    const cancelTransferRes = ok(await call('cancel-transfer', { token: t2Token }), 200);
+    const cancelTransferRes = ok(await call('cancel-transfer', { token: t2Token, method: 'POST' }), 200);
     assert.equal(cancelTransferRes.action, 'transfer_cancelled');
 
     const transferCancelled = await db().ticketTransfer.findUnique({ where: { id: transferId } });
@@ -395,6 +403,7 @@ export function registerMobileTicketTransferTests({
       }),
     );
     const tickets = ok(await api(base() + '/tickets'), 200);
+    g3.attendeeId = (await db().guestInvitation.findUniqueOrThrow({ where: { id: g3.id } })).attendeeId;
     const t3 = tickets.find((row) => row.attendeeId === g3.attendeeId);
     assert.ok(t3);
 
@@ -489,6 +498,7 @@ export function registerMobileTicketTransferTests({
       }),
     );
     const tickets = ok(await api(base() + '/tickets'), 200);
+    g4.attendeeId = (await db().guestInvitation.findUniqueOrThrow({ where: { id: g4.id } })).attendeeId;
     const t4 = tickets.find((row) => row.attendeeId === g4.attendeeId);
     assert.ok(t4);
 

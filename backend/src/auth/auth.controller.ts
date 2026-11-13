@@ -12,6 +12,8 @@ import { Throttle } from '@nestjs/throttler';
 
 class CodeDto { @IsString() @MinLength(1) @MaxLength(32) code!: string; }
 class RefreshDto { @IsString() @MinLength(43) @MaxLength(43) token!: string; }
+class FirebaseTokenDto { @IsString() @MinLength(10) @MaxLength(8192) idToken!: string; }
+class FirebaseRegisterDto { @IsString() @MaxLength(254) email!: string; @IsString() @MinLength(12) @MaxLength(256) password!: string; }
 
 @ApiTags('auth')
 @ApiBearerAuth()
@@ -31,6 +33,20 @@ export class AuthController {
   @Public() @Post('refresh') @HttpCode(200)
   refresh(@Body() dto: RefreshDto) { return this.auth.refreshToken(dto.token); }
 
+  @Public() @Post('firebase-login') @HttpCode(200)
+  @Throttle({default: {limit: 10, ttl: 60000}})
+  async firebaseLogin(@Body() dto: FirebaseTokenDto) {
+    const result = await this.auth.loginFirebase(dto.idToken);
+    const {sessionHash: _privateHash, ...identity} = result.identity;
+    return {accessToken: result.accessToken, ...identity};
+  }
+  @Post('firebase-register') @HttpCode(200)
+  @Throttle({default: {limit: 5, ttl: 60000}})
+  firebaseRegister(@Req() req: AuthenticatedRequest, @Body() dto: FirebaseRegisterDto) { return this.auth.registerFirebase(req, dto.email, dto.password); }
+  @Post('firebase-link') @HttpCode(200)
+  @Throttle({default: {limit: 5, ttl: 60000}})
+  firebaseLink(@Req() req: AuthenticatedRequest, @Body() dto: FirebaseTokenDto) { return this.auth.linkFirebase(req, dto.idToken); }
+
   @AllowPending() @Post('logout') @HttpCode(204)
   logout(@Req() req: AuthenticatedRequest) { return this.auth.logout(req.sessionHash); }
 
@@ -39,7 +55,13 @@ export class AuthController {
     // Request identity contains no hashes, passwords, private tokens or secrets.
     const sections=['Events','Event Dashboard'];
     if(req.orgRole==='super_admin')sections.push('Scanner Staff & Access','Account security');
-    return {user: req.user, role: req.orgRole, organizationId: req.orgId, permissions:[...ROLE_PERMISSIONS[req.orgRole] ?? []],requiresFactor:req.requiresFactor,requiresPasswordChange:req.requiresPasswordChange,enrolled:req.enrolled,sections};
+    return {user: req.user, role: req.orgRole, organizationId: req.orgId, permissions:[...ROLE_PERMISSIONS[req.orgRole] ?? []],requiresFactor:req.requiresFactor,requiresPasswordChange:req.requiresPasswordChange,enrolled:req.enrolled,authProvider:req.authProvider,email:req.email,sections};
+  }
+
+  @Post('firebase-exchange') @HttpCode(200)
+  @Throttle({default: {limit: 10, ttl: 60000}})
+  firebaseExchange(@Req() req: AuthenticatedRequest) {
+    return this.auth.firebaseExchange(req);
   }
 
   @AllowPending() @Post('change-password') @HttpCode(204)

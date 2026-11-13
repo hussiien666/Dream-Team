@@ -11,6 +11,9 @@ import type { RawBodyRequest } from '@nestjs/common';
 import type { Request } from 'express';
 import { EmailService } from './email.service.js';
 import { ResendProvider } from './resend.provider.js';
+import { SmtpProvider } from './smtp.provider.js';
+import { GmailProvider } from './gmail.provider.js';
+import { NotificationsService } from './notifications.service.js';
 @Controller('email')
 class EmailWebhookController {
   constructor(
@@ -41,7 +44,7 @@ class EmailWebhookController {
 }
 @Module({
   controllers: [EmailWebhookController],
-  providers: [EmailService, ResendProvider],
-  exports: [EmailService],
+  providers: [EmailService, ResendProvider, SmtpProvider, GmailProvider, NotificationsService],
+  exports: [EmailService, NotificationsService],
 })
 export class EmailModule {}

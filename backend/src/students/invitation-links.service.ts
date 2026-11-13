@@ -13,6 +13,8 @@ import type { AuthenticatedRequest } from '../common/request.js';
 import { newToken, digest } from '../common/crypto.util.js';
 import { StudentsService } from './students.service.js';
 import { parse, hash, guestSchema } from './validation.js';
+import { NotificationsService } from '../email/notifications.service.js';
+import { seal, unseal } from '../common/encryption.util.js';
 
 type Tx = Prisma.TransactionClient;
 const confirmation = z
@@ -52,6 +54,7 @@ export class InvitationLinksService {
     private readonly db: PrismaService,
     private readonly events: EventsService,
     private readonly students: StudentsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async list(eventId: number, studentId: number, r: AuthenticatedRequest) {
@@ -79,7 +82,8 @@ export class InvitationLinksService {
     body: unknown,
     r: AuthenticatedRequest,
   ) {
-    const dto = parse(confirmation, body);
+    const dto = parse(confirmation.extend({ email: z.boolean().default(false), requestKey: z.string().regex(/^[A-Za-z0-9_-]{8,80}$/).optional() }), body);
+    if (dto.email && (!dto.requestKey || !this.notifications.enabled())) throw new BadRequestException('Configure email and provide a stable request key before queuing a link.');
     return this.events.mutate(
       eventId,
       r.user.id,
@@ -88,6 +92,14 @@ export class InvitationLinksService {
       'attendees.manage',
       async (tx, event) => {
         this.open(event);
+        const key = { eventId, kind: `invitation:${studentId}`, requestKey: dto.requestKey ?? '' };
+        if (dto.requestKey) {
+          const old = await tx.eventCommunication.findUnique({ where: { eventId_kind_requestKey: key } });
+          if (old) {
+            if (old.actorId !== r.user.id || old.contentHash !== hash(dto)) throw new ConflictException('This request key belongs to another operation.');
+            return JSON.parse(unseal(old.protectedResult));
+          }
+        }
         const student = await tx.student.findFirst({
           where: { id: studentId, eventId, active: true },
         });
@@ -120,11 +132,16 @@ export class InvitationLinksService {
             }),
           },
         });
-        return {
+        const result = {
           id: link.id,
           path: '/invitation#DEI1.' + token.raw,
           expiresAt: link.expiresAt,
         };
+        if (dto.email) await this.notifications.event(tx, eventId, r.user.id, [student.email], `${event.name}: your private invitation`,
+          `Hello ${student.fullName},\nUse this private link to manage your own guests under the event rules:\n${this.notifications.publicUrl(result.path)}\nDo not share this link publicly.`,
+          `invitation:${link.id}`, { kind: 'invitation', id: link.id, tokenHash: link.tokenHash });
+        if (dto.requestKey) await tx.eventCommunication.create({ data: { ...key, actorId: r.user.id, contentHash: hash(dto), protectedResult: seal(JSON.stringify(result)), recipientCount: dto.email ? 1 : 0 } });
+        return result;
       },
     );
   }
@@ -350,6 +367,8 @@ export class InvitationLinksService {
             }),
           },
         });
+        await this.notifications.event(tx,event.id,null,await this.notifications.attendeeRecipients(tx,guest.attendeeId),
+          `${event.name}: guest registration cancelled`,'Your guest registration has been cancelled. Unused tickets for it are invalid.',`registration-cancelled:${guest.id}`);
         result = { id: guest.id, action: 'cancelled' };
       }
       await tx.publicInvitationOperation.create({

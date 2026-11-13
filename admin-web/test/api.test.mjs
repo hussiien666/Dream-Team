@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Client,ApiError,apiBase} from '../src/api.ts';
 test('browser API configuration accepts HTTPS/loopback and rejects credential URLs',()=>{
   assert.equal(apiBase(''),'/api/v1');assert.equal(apiBase('https://api.example.test/api/v1/'),'https://api.example.test/api/v1');
+  assert.equal(apiBase('https://europe-west1-demo-dream-events.cloudfunctions.net/api/api/v1'),'https://europe-west1-demo-dream-events.cloudfunctions.net/api/api/v1');
   for(const url of ['https://private:secret@api.example.test/api/v1','http://api.example.test/api/v1','https://api.example.test/wrong','https://api.example.test/api/v1?token=secret'])assert.throws(()=>apiBase(url));
 });
 test('API client uses bearer auth without cookies and supports errors and empty responses',async()=>{
@@ -32,5 +33,44 @@ test('Excel transport keeps multipart boundaries and downloads binary responses'
   assert.deepEqual(await client.request('events/7/registration-import/preview','POST',form),{errors:[]});
   globalThis.fetch=async()=>new Response(new Uint8Array([80,75,3,4]));
   const file=await client.request('events/7/registration-template','GET',undefined,undefined,true);assert.deepEqual([...new Uint8Array(await file.arrayBuffer())],[80,75,3,4]);
+ }finally{globalThis.fetch=original;}
+});
+
+test('private resource cache deduplicates, expires, invalidates and stays per session',async()=>{
+ const original=globalThis.fetch, now=Date.now;let time=100000, calls=0, resolve;
+ try{
+  Date.now=()=>time;
+  globalThis.fetch=()=>{calls++;return new Promise(r=>{resolve=r;});};
+  const first=new Client('https://api.example.test/api/v1','user-a');
+  const second=new Client('https://api.example.test/api/v1','user-b');
+  const one=first.resource('events/7/registrations');
+  const two=first.resource('events/7/registrations');
+  assert.equal(calls,1);
+  resolve(new Response(JSON.stringify([{id:7}])));
+  assert.deepEqual(await one,await two);
+  assert.equal(first.peekResource('events/7/registrations').fresh,true);
+  assert.equal(second.peekResource('events/7/registrations'),undefined);
+  await first.resource('events/7/registrations');assert.equal(calls,1);
+  time+=11000;
+  const stale=first.resource('events/7/registrations');assert.equal(calls,2);
+  assert.equal(first.peekResource('events/7/registrations').fresh,false);
+  resolve(new Response(JSON.stringify([{id:8}])));await stale;
+  globalThis.fetch=async()=>new Response(null,{status:204});
+  await first.request('events/7/guests','POST',{});
+  assert.equal(first.peekResource('events/7/registrations'),undefined);
+  assert.equal(second.peekResource('events/7/registrations'),undefined);
+ }finally{globalThis.fetch=original;Date.now=now;}
+});
+
+test('auth and public responses are never cached and access denial clears private cache',async()=>{
+ const original=globalThis.fetch;let calls=0;
+ try{
+  const client=new Client('https://api.example.test/api/v1','synthetic');
+  globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({ok:true}));};
+  await client.resource('events');await client.resource('public/invitations');await client.resource('public/invitations');
+  assert.equal(calls,3);assert.ok(client.peekResource('events'));
+  globalThis.fetch=async()=>new Response(JSON.stringify({message:'Denied'}),{status:403});
+  await assert.rejects(client.request('events/7/private'));
+  assert.equal(client.peekResource('events'),undefined);
  }finally{globalThis.fetch=original;}
 });

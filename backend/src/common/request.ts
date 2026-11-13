@@ -9,4 +9,6 @@ export type AuthenticatedRequest = Request & {
   requiresFactor: boolean;
   requiresPasswordChange: boolean;
   enrolled: boolean;
+  authProvider?: 'legacy' | 'firebase';
+  email?: string;
 };

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Client } from "./api";
 import { Dialog, Field, Notice, Loading, useAction, useResource } from "./ui";
+import { TurnstileChallenge } from './turnstile';
 
 export function InvitationLinkDialog({
   api,
@@ -10,7 +11,7 @@ export function InvitationLinkDialog({
 }: {
   api: Client;
   eventId: number;
-  student: { id: number; fullName: string };
+  student: { id: number; fullName: string; email?: string };
   close: () => void;
 }) {
   const base = `events/${eventId}/students/${student.id}/invitation-links`;
@@ -18,6 +19,7 @@ export function InvitationLinkDialog({
     { id: number; expiresAt: string; revokedAt: string | null }[]
   >(api, base);
   const a = useAction();
+  const [sendEmail, setSendEmail] = useState(false), [requestKey, setRequestKey] = useState(() => crypto.randomUUID());
   const [reason, setReason] = useState(""),
     [confirmed, setConfirmed] = useState(false),
     [url, setUrl] = useState(""),
@@ -54,6 +56,7 @@ export function InvitationLinkDialog({
         I confirm that existing links will stop working
       </label>
       <div className="actions">
+        {student.email && <label><input type="checkbox" checked={sendEmail} onChange={e => { setSendEmail(e.target.checked); setRequestKey(crypto.randomUUID()); }} />Queue the private link to {student.email}</label>}
         <button
           disabled={a.busy || !confirmed || reason.trim().length < 5}
           onClick={() =>
@@ -61,12 +64,15 @@ export function InvitationLinkDialog({
               const r = await api.request<{ path: string }>(base, "POST", {
                 confirmed: true,
                 reason,
+                email: sendEmail,
+                requestKey,
               });
               setUrl(new URL(r.path, location.origin).href);
               setMessage(
                 "Link created. Copy it now; it cannot be retrieved later.",
               );
               data.reload();
+              setRequestKey(crypto.randomUUID());
             })
           }
         >
@@ -124,6 +130,7 @@ type Definition = {
   options: string[];
 };
 type View = {
+  turnstile: { siteKey: string } | null;
   event: {
     name: string;
     venue: string;
@@ -159,6 +166,15 @@ export function PublicInvitationPage() {
     [cancel, setCancel] = useState<number>(),
     [message, setMessage] = useState(""),
     [key, setKey] = useState(() => crypto.randomUUID());
+  const [challenge, setChallenge] = useState(''), [challengeVersion, setChallengeVersion] = useState(0);
+  const submit = async (body: unknown) => {
+    try {
+      await api.request('public/invitations', 'POST', body, undefined, false,
+        challenge ? { 'X-Turnstile-Token': challenge } : undefined);
+    } finally {
+      setChallenge(''); setChallengeVersion(n => n + 1);
+    }
+  };
   return (
     <main className="auth public-invitation">
       <h1>Dream Events · Invitation</h1>
@@ -191,6 +207,7 @@ export function PublicInvitationPage() {
             disabled={!data.data.canAdd || a.busy}
             onClick={() => {
               setAdding(true);
+              setChallenge('');
               setKey(crypto.randomUUID());
             }}
           >
@@ -226,6 +243,7 @@ export function PublicInvitationPage() {
                           disabled={!g.active || a.busy}
                           onClick={() => {
                             setCancel(g.id);
+                            setChallenge('');
                             setKey(crypto.randomUUID());
                           }}
                         >
@@ -261,7 +279,7 @@ export function PublicInvitationPage() {
                             : v;
                   }
                   void a.run(async () => {
-                    await api.request("public/invitations", "POST", {
+                    await submit({
                       action: "add",
                       requestKey: key,
                       confirmed: true,
@@ -334,8 +352,9 @@ export function PublicInvitationPage() {
                   <input type="checkbox" required />I confirm these guest
                   details
                 </label>
+                <TurnstileChallenge key={challengeVersion} siteKey={data.data.turnstile?.siteKey} onToken={setChallenge} />
                 <div className="actions">
-                  <button type="submit" disabled={a.busy}>
+                  <button type="submit" disabled={a.busy || (!!data.data.turnstile && !challenge)}>
                     Save guest
                   </button>
                   <button
@@ -364,7 +383,7 @@ export function PublicInvitationPage() {
                   e.preventDefault();
                   const fd = new FormData(e.currentTarget);
                   void a.run(async () => {
-                    await api.request("public/invitations", "POST", {
+                    await submit({
                       action: "cancel",
                       guestId: cancel,
                       reason: fd.get("reason"),
@@ -390,7 +409,8 @@ export function PublicInvitationPage() {
                 <label>
                   <input type="checkbox" required />I confirm cancellation
                 </label>
-                <button disabled={a.busy} type="submit">
+                <TurnstileChallenge key={challengeVersion} siteKey={data.data.turnstile?.siteKey} onToken={setChallenge} />
+                <button disabled={a.busy || (!!data.data.turnstile && !challenge)} type="submit">
                   Confirm cancellation
                 </button>
               </form>

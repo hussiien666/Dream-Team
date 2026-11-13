@@ -24,3 +24,14 @@ migration/reports/
 !.env.example
 *.pem
 *.key
+firebase/*-debug.log
+firebase/.firebase/
+firebase/functions/
+firebase/public/scan/
+firebase/.build-*/
+firebase/.emulators.lock
+backend/static/scanner/
+.secret.local
+firebase-debug.log
+.vercel/
+firestore-debug.log

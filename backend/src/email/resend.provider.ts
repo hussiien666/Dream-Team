@@ -6,12 +6,15 @@ export type EmailPayload = {
   subject: string;
   html: string;
   text?: string;
+  replyTo?: string;
+  capability?: { kind: 'invitation' | 'ticket'; id: number; tokenHash: string };
   attachments?: { filename: string; content: string }[];
 };
 export class ProviderError extends Error {
   constructor(
     readonly retryable: boolean,
     readonly safeCode: string,
+    readonly retryAfterMs?: number,
   ) {
     super('Email delivery could not be confirmed.');
   }
@@ -28,7 +31,7 @@ export class ResendProvider {
           'Content-Type': 'application/json',
           'Idempotency-Key': key,
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ ...payload, capability: undefined, replyTo: undefined, ...(payload.replyTo ? { reply_to: payload.replyTo } : {}) }),
         signal: AbortSignal.timeout(15000),
         redirect: 'error',
       });

@@ -4,6 +4,8 @@ NestJS/TypeScript and Prisma/PostgreSQL migration in progress. The API prefix is
 
 Read [the active migration record](../docs/NODE_MIGRATION.md), [the specification](../docs/NODE_PRODUCT_SPEC.md), and [the next-session handoff](../SESSION_HANDOFF.md).
 
+The controlling production direction is now [Cloud Run/Cloud SQL, Firebase Auth and Workspace Gmail API](../docs/PRODUCTION_MIGRATION_SPEC.md). Follow [current preparation](../docs/PRODUCTION_SETUP.md) before older deployment sections below. Deployment remains held pending both owner account confirmations. Local migrations 12-15 are not applied to the hosted Aiven authority or trial staging copy (both at 11). No live mail is authorized.
+
 ## Local setup
 
 Use Node 24 (validated: 24.15.0), npm, PostgreSQL, and regular Python 3.10 for the Streamlit frontend. No venv. From this directory:

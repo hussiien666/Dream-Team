@@ -1,0 +1,78 @@
+# Preparation only. Do not create/execute until deployment and live email are authorized.
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: dream-events-email
+spec:
+  template:
+    spec:
+      taskCount: 1
+      parallelism: 1
+      template:
+        metadata:
+          annotations:
+            run.googleapis.com/cloudsql-instances: PROJECT_ID:REGION:INSTANCE_ID
+            run.googleapis.com/execution-environment: gen2
+        spec:
+          serviceAccountName: dream-events-email@PROJECT_ID.iam.gserviceaccount.com
+          maxRetries: 0
+          timeoutSeconds: '300'
+          containers:
+            - image: REGION-docker.pkg.dev/PROJECT_ID/dream-events/api@sha256:IMAGE_DIGEST
+              command: [node, dist/email/job.js]
+              resources:
+                limits:
+                  cpu: '1'
+                  memory: 512Mi
+              env:
+                - name: NODE_ENV
+                  value: production
+                - name: CLOUD_SQL_CONNECTION_NAME
+                  value: PROJECT_ID:REGION:INSTANCE_ID
+                - name: PG_POOL_MAX
+                  value: '2'
+                - name: CORS_ORIGINS
+                  value: https://ADMIN_DOMAIN,https://SCANNER_DOMAIN
+                - name: PUBLIC_BASE_URL
+                  value: https://ADMIN_DOMAIN
+                - name: EMAIL_ENABLED
+                  value: 'true'
+                - name: EMAIL_PROVIDER
+                  value: gmail
+                - name: EMAIL_FROM
+                  value: Dream Events <tickets@DOMAIN>
+                - name: GMAIL_MAILBOX
+                  value: tickets@DOMAIN
+                - name: GMAIL_MAX_PER_MINUTE
+                  value: '20'
+                - name: GMAIL_MAX_PER_DAY
+                  value: '400'
+                - name: EMAIL_JOB_MAX_MESSAGES
+                  value: '100'
+                - name: EMAIL_JOB_MAX_SECONDS
+                  value: '240'
+                - name: NODE_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: dream-events-database-url
+                      key: '1'
+                - name: APP_ENCRYPTION_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: dream-events-encryption-key
+                      key: '1'
+                - name: GMAIL_CLIENT_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: dream-events-gmail-client-id
+                      key: '1'
+                - name: GMAIL_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: dream-events-gmail-client-secret
+                      key: '1'
+                - name: GMAIL_REFRESH_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: dream-events-gmail-refresh-token
+                      key: '1'

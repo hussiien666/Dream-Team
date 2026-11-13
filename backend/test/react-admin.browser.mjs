@@ -7,6 +7,8 @@ import path from 'node:path';
 import {createServer} from 'node:net';
 import {chromium} from '../../admin-web/node_modules/playwright-core/index.mjs';
 export async function runAdminBrowser({origin,auth,db,recoveryCode}){
+  const originalFetch = globalThis.fetch;
+  const turnstileEnv = Object.fromEntries(['TURNSTILE_ENABLED', 'TURNSTILE_SITE_KEY', 'TURNSTILE_SECRET_KEY', 'TURNSTILE_HOSTNAMES'].map(key => [key, process.env[key]]));
   // Synthetic outbox fixture, independently configured; no worker/provider sends.
   process.env.EMAIL_ENABLED='true';process.env.RESEND_API_KEY='synthetic-browser-key';process.env.EMAIL_FROM='testing@example.com';
   // Never attach browser QA to the user's already running hosted-database preview.
@@ -20,13 +22,16 @@ export async function runAdminBrowser({origin,auth,db,recoveryCode}){
     assert.ok(ready,'React preview did not start.');
     browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE || 'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--no-sandbox']});
     page=await browser.newPage({viewport:{width:1365,height:900}});
-    let businessCalls=0;page.on('request',r=>{if(r.url().startsWith(origin+'/api/v1/events'))businessCalls++;});
+    let businessCalls=0,eventListCalls=0;page.on('request',r=>{if(r.url().startsWith(origin+'/api/v1/events'))businessCalls++;if(r.url()===origin+'/api/v1/events'&&r.method()==='GET')eventListCalls++;});
     await page.goto(webOrigin+'/events');
+    await page.getByRole('heading',{name:'Administrator sign in'}).waitFor();
     await page.getByLabel('Username',{exact:true}).fill('legacy_admin');await page.getByLabel('Password',{exact:true}).fill('legacy-test-password');await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await page.getByRole('heading',{name:'Verify your account'}).waitFor();assert.equal(businessCalls,0);
     await page.reload();await page.getByRole('heading',{name:'Verify your account'}).waitFor();assert.equal(businessCalls,0);
     await page.getByLabel('Verification code').fill(recoveryCode);await page.getByRole('button',{name:'Verify',exact:true}).click();
     await page.getByRole('heading',{name:'Events',exact:true}).waitFor();
+    await page.getByRole('link',{name:'Open',exact:true}).first().waitFor();
+    assert.equal(eventListCalls,1,'Workspace and Events must share one request');
     await page.getByRole('button',{name:'Add event',exact:true}).click();
     let dialog=page.getByRole('dialog',{name:'Create event'});
     await dialog.getByLabel('Event name',{exact:true}).fill('React browser event');await dialog.getByLabel('Venue',{exact:true}).fill('React hall');await dialog.getByLabel('Event date',{exact:true}).fill('2036-04-05');await dialog.getByLabel('Start time (device time)',{exact:true}).fill('2036-04-05T08:00');await dialog.getByLabel('End time (device time)',{exact:true}).fill('2036-04-05T18:00');await dialog.getByLabel('Capacity',{exact:true}).fill('30');await dialog.getByRole('button',{name:'Save event',exact:true}).click();await dialog.waitFor({state:'hidden'});
@@ -82,24 +87,87 @@ export async function runAdminBrowser({origin,auth,db,recoveryCode}){
     await db.backgroundJob.updateMany({where:{eventId:event.id,status:{in:['Pending','Running']}},data:{status:'Failed'}});
     await page.getByRole('button',{name:'Email delivery',exact:true}).click();await page.getByRole('heading',{name:'Ticket email delivery',exact:true}).waitFor();await page.getByRole('button',{name:'Edit ticket email template',exact:true}).click();dialog=page.getByRole('dialog',{name:'Ticket email template'});await dialog.getByLabel('Subject',{exact:true}).fill('Browser ticket for {guest_name}');await dialog.getByRole('button',{name:'Save email template',exact:true}).click();await dialog.waitFor({state:'hidden'});await page.getByRole('button',{name:'Back to tickets',exact:true}).click();
     await page.getByRole('button',{name:'Email selected tickets',exact:true}).click();dialog=page.getByRole('dialog',{name:'Review ticket email recipients'});await dialog.getByText(/browser-guest@example.com/).waitFor();await dialog.getByLabel('Intentionally resend or retry a completed attempt',{exact:true}).check();await dialog.getByLabel('Resend reason',{exact:true}).fill('Browser confirmed resend test');await dialog.getByLabel('I reviewed the recipients and confirm sending',{exact:true}).check();await dialog.getByRole('button',{name:'Queue ticket emails',exact:true}).click();await dialog.waitFor({state:'hidden'});await page.getByText('2 email jobs queued. Review Email delivery for progress.',{exact:true}).waitFor();await page.getByRole('button',{name:'Email delivery',exact:true}).click();await page.getByRole('heading',{name:'Ticket email delivery',exact:true}).waitFor();await page.getByRole('cell',{name:'Pending',exact:true}).first().waitFor();await page.getByRole('button',{name:'Back to tickets',exact:true}).click();
+    await page.getByRole('link',{name:'Reports',exact:true}).click();
+    await page.getByRole('heading',{name:'Reports',exact:true}).waitFor();
+    await page.getByRole('row').filter({hasText:'Tickets issued'}).waitFor();
+    await page.getByLabel('View table').selectOption('Categories');
+    await page.getByRole('row').filter({hasText:'GUEST'}).waitFor();
+    const reportDownload=page.waitForEvent('download');
+    await page.getByRole('button',{name:'Download Excel report'}).click();
+    const reportFile=await reportDownload;
+    assert.equal((await readFile(await reportFile.path())).subarray(0,2).toString(),'PK');
+    await page.getByLabel('View table').selectOption('Audit history');
+    await page.getByRole('heading',{name:'Event audit history'}).waitFor();
+    await page.getByRole('row').filter({hasText:'event.created'}).waitFor();
+    await page.getByLabel('View table').selectOption('Scanner staff');
+    await page.getByRole('heading',{name:'Scanner staff'}).waitFor();
+    await page.getByRole('row').filter({hasText:'React scanner'}).waitFor();
     // Public capability is independent of admin login and cannot load another student's data.
     await page.getByRole('link',{name:'Students & Invitations',exact:true}).click();
     await page.getByRole('row').filter({hasText:'Updated browser sender'}).getByRole('button',{name:'Invitation link',exact:true}).click();
     dialog=page.getByRole('dialog',{name:'Personal invitation link',exact:true});await dialog.getByLabel('Link action reason').fill('Browser personal invitation test');await dialog.getByLabel('I confirm that existing links will stop working',{exact:true}).check();await dialog.getByRole('button',{name:'Create replacement link',exact:true}).click();
     const publicUrl=await dialog.getByLabel('Private invitation URL').inputValue();assert.ok(publicUrl.startsWith(webOrigin+'/invitation#DEI1.'));
     const publicContext=await browser.newContext({viewport:{width:430,height:932}}), publicPage=await publicContext.newPage();let adminCalls=0;
+    Object.assign(process.env, { TURNSTILE_ENABLED: 'true', TURNSTILE_SITE_KEY: 'synthetic-browser-site', TURNSTILE_SECRET_KEY: 'synthetic-browser-secret', TURNSTILE_HOSTNAMES: '127.0.0.1' });
+    let acceptChallenge = false;
+    globalThis.fetch = async (url, options) => String(url) === 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
+      ? Response.json({ success: acceptChallenge, action: 'public-invitation', hostname: '127.0.0.1', challenge_ts: new Date().toISOString() })
+      : originalFetch(url, options);
+    await publicPage.route('https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit', route => route.fulfill({ contentType: 'application/javascript', body: `window.turnstile = {
+      render(element, options) { const button = document.createElement('button'); button.type = 'button'; button.textContent = 'Complete synthetic security check'; button.onclick = () => options.callback('synthetic-browser-token'); element.append(button); return 'synthetic-widget'; },
+      remove() { document.querySelector('[aria-label="Security check"]')?.firstElementChild?.replaceChildren(); }
+    };` }));
     publicPage.on('request',r=>{if(r.url().startsWith(origin+'/api/v1/events')||r.url().startsWith(origin+'/api/v1/auth'))adminCalls++;});
     await publicPage.goto(publicUrl);await publicPage.getByRole('heading',{name:event.name,exact:true}).waitFor();assert.equal(adminCalls,0);assert.equal(await publicPage.getByText(/Imported browser sender/).count(),0);
-    await publicPage.getByRole('button',{name:'Add guest',exact:true}).click();let guestDialog=publicPage.getByRole('dialog',{name:'Add invited guest'});await guestDialog.getByLabel('Guest name',{exact:true}).fill('Public browser guest');await guestDialog.getByLabel('Guest email',{exact:true}).fill('public-browser@example.com');await guestDialog.getByLabel('Ticket category',{exact:true}).selectOption({label:'Guest'});await guestDialog.getByLabel('I confirm these guest details',{exact:true}).check();await guestDialog.getByRole('button',{name:'Save guest',exact:true}).click();await guestDialog.waitFor({state:'hidden'});
-    await publicPage.getByRole('row').filter({hasText:'Public browser guest'}).getByRole('button',{name:'Cancel invitation',exact:true}).click();guestDialog=publicPage.getByRole('dialog',{name:'Cancel guest invitation'});await guestDialog.getByLabel('Cancellation reason').fill('Public browser cancellation');await guestDialog.getByLabel('I confirm cancellation',{exact:true}).check();await guestDialog.getByRole('button',{name:'Confirm cancellation',exact:true}).click();await guestDialog.waitFor({state:'hidden'});await publicPage.getByRole('row').filter({hasText:'Public browser guest'}).getByRole('cell',{name:'Cancelled',exact:true}).waitFor();
+    await publicPage.getByRole('button',{name:'Add guest',exact:true}).click();let guestDialog=publicPage.getByRole('dialog',{name:'Add invited guest'});await guestDialog.getByLabel('Guest name',{exact:true}).fill('Public browser guest');await guestDialog.getByLabel('Guest email',{exact:true}).fill('public-browser@example.com');await guestDialog.getByLabel('Ticket category',{exact:true}).selectOption({label:'Guest'});await guestDialog.getByLabel('I confirm these guest details',{exact:true}).check();
+    assert.equal(await guestDialog.getByRole('button',{name:'Save guest',exact:true}).isDisabled(), true);
+    await guestDialog.getByRole('button',{name:'Complete synthetic security check',exact:true}).click();
+    await guestDialog.getByRole('button',{name:'Save guest',exact:true}).click();await guestDialog.getByRole('alert').filter({hasText:'Complete the security check again'}).waitFor();
+    assert.equal(await guestDialog.getByLabel('Guest name',{exact:true}).inputValue(), 'Public browser guest');
+    acceptChallenge = true;await guestDialog.getByRole('button',{name:'Complete synthetic security check',exact:true}).click();
+    const savedInvitation = publicPage.waitForResponse(r => r.url() === origin + '/api/v1/public/invitations' && r.request().method() === 'POST');
+    await guestDialog.getByRole('button',{name:'Save guest',exact:true}).click();
+    const invitationResponse = await savedInvitation;assert.equal(invitationResponse.status(), 200, await invitationResponse.text());
+    await guestDialog.waitFor({state:'hidden'});
+    await publicPage.getByRole('row').filter({hasText:'Public browser guest'}).getByRole('button',{name:'Cancel invitation',exact:true}).click();guestDialog=publicPage.getByRole('dialog',{name:'Cancel guest invitation'});await guestDialog.getByLabel('Cancellation reason').fill('Public browser cancellation');await guestDialog.getByLabel('I confirm cancellation',{exact:true}).check();await guestDialog.getByRole('button',{name:'Complete synthetic security check',exact:true}).click();await guestDialog.getByRole('button',{name:'Confirm cancellation',exact:true}).click();await guestDialog.waitFor({state:'hidden'});await publicPage.getByRole('row').filter({hasText:'Public browser guest'}).getByRole('cell',{name:'Cancelled',exact:true}).waitFor();
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(turnstileEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     assert.ok(await publicPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));mkdirSync(path.resolve('../tmp/browser-tests'),{recursive:true});await publicPage.screenshot({path:path.resolve('../tmp/browser-tests/dream-invitation-mobile.png')});
     await dialog.getByRole('button',{name:'Revoke all links',exact:true}).click();await dialog.getByText('All links revoked.',{exact:true}).waitFor();await publicPage.reload();await publicPage.getByRole('alert').filter({hasText:/invalid, expired/}).waitFor();await publicContext.close();await dialog.getByRole('button',{name:'Close dialog',exact:true}).click();
+    await page.getByRole('link',{name:'Independent attendees',exact:true}).click();await page.getByRole('heading',{name:'Independent attendees',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Add attendee',exact:true}).click();dialog=page.getByRole('dialog',{name:'Add attendee',exact:true});
+    await dialog.getByLabel('Full name',{exact:true}).fill('مشارك Browser');await dialog.getByLabel('Email address',{exact:true}).fill('independent-browser@example.test');
+    await dialog.getByLabel('Student / National ID',{exact:true}).fill('00084');await dialog.getByLabel('Ticket category',{exact:true}).selectOption({label:'Guest'});
+    await dialog.getByLabel('Notes',{exact:true}).fill('=2+2');await dialog.getByRole('button',{name:'Save attendee',exact:true}).click();await dialog.waitFor({state:'hidden'});
+    await page.getByLabel('Search attendees',{exact:true}).fill('مشارك');const attendeeCsv=page.waitForEvent('download');await page.getByRole('button',{name:'Export attendee CSV',exact:true}).click();
+    const attendeeExport=await readFile(await (await attendeeCsv).path(),'utf8');assert.match(attendeeExport,/00084/);assert.match(attendeeExport,/'=2\+2/);
+    await page.getByRole('button',{name:'Import attendees',exact:true}).click();dialog=page.getByRole('dialog',{name:'Import independent attendees',exact:true});
+    await dialog.getByLabel('Attendee file',{exact:true}).setInputFiles({name:'browser-attendees.csv',mimeType:'text/csv',buffer:Buffer.from('Person,Contact,ID code\nImported independent,imported-independent@example.test,00085')});
+    await dialog.getByLabel('Default import category',{exact:true}).selectOption({label:'Guest'});
+    await dialog.getByRole('button',{name:'Change column matching',exact:true}).click();
+    await dialog.getByLabel('Source for Full name',{exact:true}).selectOption({label:'1: Person'});
+    await dialog.getByLabel('Source for Email address',{exact:true}).selectOption({label:'2: Contact'});
+    await dialog.getByLabel('Source for Student / National ID',{exact:true}).selectOption({label:'3: ID code'});
+    await dialog.getByRole('button',{name:'Preview attendee import',exact:true}).click();await dialog.getByText('1 valid rows; 0 errors.',{exact:true}).waitFor();
+    await dialog.getByLabel('I reviewed this attendee import',{exact:true}).check();await dialog.getByRole('button',{name:'Confirm attendee import',exact:true}).click();
+    await dialog.getByText('Import completed successfully.',{exact:true}).waitFor();await dialog.getByRole('button',{name:'Done',exact:true}).click();
+    await page.getByRole('link',{name:'Announcements',exact:true}).click();await page.getByRole('heading',{name:'Event announcements',exact:true}).waitFor();
+    await page.getByLabel('Subject',{exact:true}).fill('Browser announcement');await page.getByLabel('Message',{exact:true}).fill('Synthetic reviewed announcement');
+    await page.getByRole('button',{name:'Review recipients',exact:true}).click();await page.getByRole('heading',{name:'Review announcement',exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Queue reviewed announcement',exact:true}).isDisabled(),true);
     mkdirSync(path.resolve('../tmp/browser-tests'),{recursive:true});await page.screenshot({path:path.resolve('../tmp/browser-tests/dream-admin-desktop.png')});
     await page.setViewportSize({width:430,height:932});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:path.resolve('../tmp/browser-tests/dream-admin-mobile.png')});
+    assert.ok(await page.evaluate(()=>document.querySelector('meta[name=viewport]').content.includes('viewport-fit=cover')));
+    await page.getByRole('link',{name:'Audit history',exact:true}).click();await page.getByRole('heading',{name:'Organization audit history',exact:true}).waitFor();
+    await page.getByRole('columnheader',{name:'Time UTC',exact:true}).waitFor();
+    const organizationAuditDownload=page.waitForEvent('download');await page.getByRole('button',{name:'Export organization audit CSV',exact:true}).click();
+    assert.match(await readFile(await(await organizationAuditDownload).path(),'utf8'),/event\.created/);
+    await page.goto(webOrigin+'/unavailable-page');await page.getByRole('heading',{name:'Page unavailable'}).waitFor();
+    await page.getByRole('link',{name:'Return to events',exact:true}).click();await page.getByRole('heading',{name:'Events',exact:true}).waitFor();
     await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByRole('dialog',{name:'Sign out',exact:true}).getByRole('button',{name:'Confirm'}).click();await page.getByRole('heading',{name:'Administrator sign in'}).waitFor();
     await page.getByLabel('Username',{exact:true}).fill('test_manager');await page.getByLabel('Password',{exact:true}).fill('a-manager-test-password');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Events',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Add event',exact:true}).count(),0);
     await page.goto(`${webOrigin}/events/${event.id}/settings`);await page.getByRole('heading',{name:'Page unavailable'}).waitFor();
     await page.evaluate(()=>sessionStorage.setItem('dream-events-admin-token','x'.repeat(43)));await page.reload();await page.getByRole('heading',{name:'Administrator sign in'}).waitFor();
     await page.close();
-  }catch(error){if(page){mkdirSync(path.resolve('../tmp/browser-tests'),{recursive:true});await page.screenshot({path:path.resolve('../tmp/browser-tests/dream-admin-failure.png')}).catch(()=>{});console.error('Synthetic browser failure screen: '+(await page.locator('body').innerText().catch(()=>'' )).slice(0,2500));}throw error;}finally{if(browser)await browser.close();child.kill('SIGTERM');}
+  }catch(error){if(page){mkdirSync(path.resolve('../tmp/browser-tests'),{recursive:true});await page.screenshot({path:path.resolve('../tmp/browser-tests/dream-admin-failure.png')}).catch(()=>{});console.error('Synthetic browser failure screen: '+(await page.locator('body').innerText().catch(()=>'' )).slice(0,2500));}throw error;}finally{globalThis.fetch = originalFetch;for (const [key, value] of Object.entries(turnstileEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }if(browser)await browser.close();child.kill('SIGTERM');}
 }

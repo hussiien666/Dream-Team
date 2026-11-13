@@ -11,7 +11,11 @@ import { seal, unseal } from '../common/encryption.util.js';
 import { digest } from '../common/crypto.util.js';
 import { ResendProvider, ProviderError } from './resend.provider.js';
 import type { EmailPayload } from './resend.provider.js';
+import { SmtpProvider } from './smtp.provider.js';
+import { emailConfigured, emailMode } from './smtp.config.js';
 import { mailContext } from '../tickets/ticket-engine/mail-context.js';
+import { GmailProvider } from './gmail.provider.js';
+import { gmailOptions } from './gmail.config.js';
 const retries = [60000, 300000, 900000];
 const states: Record<string, string> = {
   'email.sent': 'Sent',
@@ -26,21 +30,44 @@ export class EmailService {
   constructor(
     private readonly db: PrismaService,
     private readonly provider: ResendProvider,
+    private readonly smtp: SmtpProvider,
+    private readonly gmail: GmailProvider,
   ) {}
   isEnabled() {
-    return (
-      process.env.EMAIL_ENABLED === 'true' &&
-      !!process.env.RESEND_API_KEY &&
-      !!process.env.EMAIL_FROM
-    );
+    return emailConfigured();
   }
   private enabled() {
-    if (
-      process.env.EMAIL_ENABLED !== 'true' ||
-      !process.env.RESEND_API_KEY ||
-      !process.env.EMAIL_FROM
-    )
+    if (!this.isEnabled())
       throw new ServiceUnavailableException('Email delivery is not enabled.');
+  }
+  async broadcast(tx: Prisma.TransactionClient, organizationId: number, eventId: number, actorId: number, subject: string, text: string, key: string) {
+    this.enabled();
+    const dedupeKey = 'notice-expand:' + digest(`${organizationId}:${eventId}:${key}`);
+    await tx.backgroundJob.create({ data: { organizationId, eventId, kind: emailMode() + '.expand', dedupeKey,
+      payload: seal(JSON.stringify({ actorId, subject, text, source: 0, cursor: 0 })) } });
+  }
+  private async expandNotice(now: Date, mode: string) {
+    return this.db.$transaction(async tx => {
+      const [job] = await tx.$queryRaw<{ id: number; event_id: number; organization_id: number; payload: string }[]>`
+        SELECT id,event_id,organization_id,payload FROM background_jobs WHERE kind=${mode + '.expand'} AND status='Pending' AND available_at<=${now}
+        ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1`;
+      if (!job) return false;
+      const state = JSON.parse(unseal(job.payload)) as { actorId: number; subject: string; text: string; source: number; cursor: number };
+      let rows: {id:number;email:string|null}[];
+      if (state.source === 0) rows = await tx.student.findMany({ where: { eventId: job.event_id, active: true, id: { gt: state.cursor } }, select: { id:true,email:true }, orderBy: {id:'asc'}, take:100 });
+      else if (state.source === 1) rows = await tx.guestInvitation.findMany({ where: { eventId: job.event_id, active: true, id: { gt: state.cursor } }, select: { id:true,email:true }, orderBy: {id:'asc'}, take:100 });
+      else rows = await tx.attendee.findMany({ where: { eventId: job.event_id, status: 'Registered', guestInvitation: {is:null}, id: {gt:state.cursor} }, select: {id:true,email:true}, orderBy:{id:'asc'}, take:100 });
+      for (const row of rows) {
+        const recipient = row.email?.trim().toLowerCase();
+        if (!recipient || !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(recipient)) continue;
+        const html = state.text.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!)).replace(/\n/g,'<br>');
+        await this.enqueue(job.organization_id, job.event_id, null, { to:[recipient], subject:state.subject, text:state.text, html:`<p>${html}</p>` }, `notice:${job.id}:${digest(recipient)}`,tx);
+      }
+      if (rows.length) state.cursor = rows.at(-1)!.id;
+      if (rows.length < 100) { state.source++; state.cursor=0; }
+      await tx.backgroundJob.update({ where:{id:job.id}, data:{payload:seal(JSON.stringify(state)),status:state.source>2?'Sent':'Pending',attempts:{increment:1}} });
+      return true;
+    }, {timeout:120000});
   }
   async enqueue(
     organizationId: number,
@@ -56,6 +83,7 @@ export class EmailService {
       idempotencyKey.length > 200 ||
       !message.to.length ||
       message.to.length > 50 ||
+      (emailMode() === 'gmail' && message.to.length !== 1) ||
       message.to.some((v) => !/^\S+@[^\s@]+\.[^\s@]+$/.test(v)) ||
       !message.subject ||
       message.subject.length > 300 ||
@@ -63,7 +91,8 @@ export class EmailService {
     )
       throw new BadRequestException('Invalid email message.');
     const payload = seal(
-      JSON.stringify({ ...message, from: process.env.EMAIL_FROM }),
+      JSON.stringify({ ...message, from: process.env.EMAIL_FROM,
+        ...(process.env.EMAIL_REPLY_TO ? { replyTo: process.env.EMAIL_REPLY_TO } : {}) }),
     );
     const dedupeKey =
       'resend:' + digest(`${organizationId}:${eventId}:${idempotencyKey}`);
@@ -97,7 +126,7 @@ export class EmailService {
         data: {
           organizationId,
           eventId,
-          kind: 'resend.email',
+          kind: emailMode() + '.email',
           dedupeKey,
           payload,
           mailDelivery: { create: {} },
@@ -118,11 +147,25 @@ export class EmailService {
   /** One leased job per tick. Safe to run multiple workers against PostgreSQL. */
   async tick(now = new Date()): Promise<boolean> {
     this.enabled();
+    const mode = emailMode();
+    if (await this.expandNotice(now, mode)) return true;
+    const kind = mode + '.email';
     const claimed = await this.db.$transaction(async (tx) => {
+      const limit = mode === 'gmail' ? gmailOptions() : null;
+      const mailboxHash = limit ? digest(limit.mailbox) : '';
+      // Serialize mailbox quota reservations across workers/organizations/Cloud Run executions.
+      if (limit) await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${mailboxHash}, 7))`;
       const rows = await tx.$queryRaw<
-        { id: number }[]
-      >`SELECT id FROM background_jobs WHERE kind='resend.email' AND ((status='Pending' AND available_at<=${now}) OR (status='Running' AND lease_until<=${now})) ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1`;
+        { id: number; status: string }[]
+      >`SELECT id, status FROM background_jobs WHERE kind=${kind} AND ((status='Pending' AND available_at<=${now}) OR (status='Running' AND lease_until<=${now})) ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1`;
       if (!rows.length) return null;
+      if (limit && rows[0].status !== 'Running') {
+        const [counts] = await tx.$queryRaw<{ minute: number; day: number }[]>`
+          SELECT count(*) FILTER (WHERE reserved_at > ${new Date(+now - 60000)})::int AS minute,
+            count(*)::int AS day FROM mail_send_attempts
+          WHERE mailbox_hash=${mailboxHash} AND reserved_at > ${new Date(+now - 86400000)}`;
+        if (counts.minute >= limit.perMinute || counts.day >= limit.perDay) return null;
+      }
       const leaseToken = randomBytes(24).toString('hex');
       const job = await tx.backgroundJob.update({
         where: { id: rows[0].id },
@@ -141,10 +184,16 @@ export class EmailService {
           where: { jobId: job.id },
           data: { firstAttemptAt: now },
         });
-      return { job, firstAttemptAt: delivery.firstAttemptAt ?? now };
+      if (limit && rows[0].status !== 'Running')
+        await tx.mailSendAttempt.create({ data: { jobId: job.id, mailboxHash, reservedAt: now } });
+      return { job, firstAttemptAt: delivery.firstAttemptAt ?? now, interrupted: mode !== 'resend' && rows[0].status === 'Running' };
     });
     if (!claimed) return false;
     const { job, firstAttemptAt } = claimed;
+    if (claimed.interrupted) {
+      await this.finish(job.id, job.leaseToken, 'Unknown', 'Unknown', mode + '_interrupted');
+      return true;
+    }
     const dispatch = await this.db.ticketDispatch.findUnique({
       where: { jobId: job.id },
     });
@@ -203,8 +252,20 @@ export class EmailService {
       return true;
     }
     let sent = false;
+    if (message.capability) {
+      const cap = message.capability;
+      let live = false;
+      if (cap.kind === 'invitation') {
+        const link = await this.db.publicInvitationLink.findFirst({ where: { id: cap.id, tokenHash: cap.tokenHash, revokedAt: null, expiresAt: { gt: now } } });
+        live = !!link && !!await this.db.student.findFirst({where:{id:link.studentId,eventId:link.eventId,active:true,email:message.to[0]}});
+      } else {
+        const link = await this.db.publicTicketLink.findFirst({ where: { id: cap.id, tokenHash: cap.tokenHash, revokedAt: null, expiresAt: { gt: now } } });
+        live = !!link && !!await this.db.ticket.findFirst({where:{id:link.ticketId,eventId:link.eventId,status:'Active',attendee:{status:'Registered'}}});
+      }
+      if (!live) { await this.finish(job.id, job.leaseToken, 'Failed', 'Failed', 'private_link_expired_or_revoked'); return true; }
+    }
     try {
-      const id = await this.provider.send(message, job.dedupeKey);
+      const id = await (mode === 'gmail' ? this.gmail : mode === 'smtp' ? this.smtp : this.provider).send(message, job.dedupeKey);
       sent = true;
       await this.db.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM background_jobs WHERE id=${job.id} FOR UPDATE`;
@@ -242,7 +303,8 @@ export class EmailService {
         error instanceof ProviderError
           ? error.safeCode
           : 'email_processing_error';
-      const delay = retries[job.attempts - 1];
+      const baseDelay = retries[job.attempts - 1];
+      const delay = baseDelay === undefined ? undefined : Math.max(baseDelay, error instanceof ProviderError ? error.retryAfterMs ?? 0 : 0);
       if (retryable && delay !== undefined)
         await this.db.backgroundJob.updateMany({
           where: { id: job.id, status: 'Running', leaseToken: job.leaseToken },
@@ -258,6 +320,9 @@ export class EmailService {
         const uncertain = [
           'provider_connection',
           'provider_invalid_response',
+          'smtp_uncertain',
+          'smtp_partial_acceptance',
+          'gmail_uncertain',
         ].includes(safe);
         await this.finish(
           job.id,

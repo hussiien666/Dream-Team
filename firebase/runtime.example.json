@@ -1,0 +1,14 @@
+{
+  "NODE_DATABASE_URL": "",
+  "PG_SSL": "true",
+  "PG_CA_CERT": "",
+  "PG_POOL_MAX": "2",
+  "APP_ENCRYPTION_KEY": "",
+  "CORS_ORIGINS": "https://dream-team-peach.vercel.app,https://dream-team-scanner.vercel.app",
+  "PUBLIC_BASE_URL": "https://dream-team-peach.vercel.app",
+  "TRUST_PROXY_HOPS": "1",
+  "EMAIL_ENABLED": "false",
+  "EMAIL_PROVIDER": "resend",
+  "FIREBASE_PROJECT_ID": "dream-team-bed27",
+  "FIREBASE_AUTH_BRIDGE_ENABLED": "false"
+}

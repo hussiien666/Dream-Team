@@ -1,0 +1,8 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // All business data remains behind authenticated server APIs. Identity
+    // claims alone never grant direct access to attendees, QR data or history.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

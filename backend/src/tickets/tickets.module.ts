@@ -16,11 +16,12 @@ import {MobileTicketsService} from './mobile-tickets.service.js';
 @Module({
   imports: [AuthModule, EventsModule, EmailModule],
   controllers: [
+    // Specific ticket subpaths must precede TicketsController's :id/:action route.
+    MobileTicketsController,
+    TransfersController,
     TicketsController,
     TemplatesController,
     DeliveryController,
-    TransfersController,
-    MobileTicketsController,
     PublicTicketsController,
   ],
   providers: [

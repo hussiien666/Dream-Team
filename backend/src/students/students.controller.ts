@@ -16,7 +16,7 @@ import {
   Header,
   HttpCode,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { RegistrationUploadInterceptor } from './registration-upload.js';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard.js';
 import type { AuthenticatedRequest } from '../common/request.js';
@@ -185,16 +185,7 @@ export class StudentsController {
     });
   }
   @Post('registration-import/preview')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: {
-        fileSize: 10 * 1024 * 1024,
-        files: 1,
-        fields: 4,
-        fieldSize: 2000,
-      },
-    }),
-  )
+  @UseInterceptors(RegistrationUploadInterceptor)
   preview(
     @Param('eventId', ParseIntPipe) e: number,
     @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,
@@ -204,16 +195,7 @@ export class StudentsController {
     return this.service.importFile(e, this.file(file), body, false, r);
   }
   @Post('registration-import/commit')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: {
-        fileSize: 10 * 1024 * 1024,
-        files: 1,
-        fields: 4,
-        fieldSize: 2000,
-      },
-    }),
-  )
+  @UseInterceptors(RegistrationUploadInterceptor)
   commit(
     @Param('eventId', ParseIntPipe) e: number,
     @UploadedFile() file: { buffer: Buffer; originalname: string } | undefined,
