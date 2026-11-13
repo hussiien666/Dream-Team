@@ -1,5 +1,7 @@
 # Personal invitation checkpoint — 11 November 2026
 
+**13 November extension:** [The primary private registration form](PERFORMANCE_REGISTRATION.md) now supports owned student details, guest quantities and guest amendments. The historical restriction below on editing student records is superseded only for the capability owner's name/email/phone/custom fields. Student IDs, sender, eligibility and limits remain protected. Guest quantity excludes the student's own ticket and counts existing active guests toward the event allowance. Public growth checks event/category places even without automatic issuance; existing transaction/idempotency/Turnstile controls apply. Local email producers now exist, but hosted setup/live sending remain unverified and disabled. Deployment stays held.
+
 Continues the existing registration, atomic ticket and delivery services. This is a limited invitation page, without student accounts or a student dashboard.
 
 ## Implemented

@@ -5,6 +5,7 @@ import { PrismaService } from '../database/prisma.service.js';
 import { EventsService } from '../events/events.service.js';
 import { NotificationsService } from '../email/notifications.service.js';
 import { parse } from '../students/validation.js';
+import { listPage,pageResult } from '../common/list-page.js';
 const optionalText = (max: number) => z.string().trim().max(max).nullable().transform(v => v || null);
 export const attendeeInput = z.object({
   fullName:z.string().trim().min(2).max(200), categoryId:z.number().int().positive(),
@@ -16,6 +17,12 @@ type Input = z.infer<typeof attendeeInput>;
 @Injectable()
 export class AttendeesService {
   constructor(private readonly db:PrismaService,private readonly events:EventsService,private readonly notifications:NotificationsService) {}
+  async page(eventId:number,userId:number,role:string,orgId:number,query:unknown){
+    await this.events.assertAccess(eventId,userId,role,orgId,'attendees.manage');const q=listPage(query);
+    return pageResult(await this.db.attendee.findMany({where:{eventId,guestInvitation:{is:null},...(q.after?{id:{gt:q.after}}:{}),
+      ...(q.status==='all'?{}:{status:q.status==='Registered'||q.status==='active'?'Registered':'Cancelled'}),...(q.search?{OR:[{fullName:{contains:q.search,mode:'insensitive'}},{email:{contains:q.search,mode:'insensitive'}},{identityNumber:{contains:q.search}},{phone:{contains:q.search}},{tickets:{some:{number:{contains:q.search,mode:'insensitive'}}}}]}:{})},
+      orderBy:{id:'asc'},take:51,include:{category:{select:{id:true,name:true}},tickets:{select:{id:true,number:true,status:true}}}}));
+  }
   async findAll(eventId:number,userId:number,role:string,orgId:number,independent=false) {
     await this.events.assertAccess(eventId,userId,role,orgId,'attendees.manage');
     return this.db.attendee.findMany({where:{eventId,...(independent?{guestInvitation:{is:null}}:{})},orderBy:[{fullName:'asc'},{id:'asc'}],

@@ -2,6 +2,7 @@ export type Identity = {
   user: { id: number; username: string; displayName: string };
   role: string;
   organizationId: number;
+  accessRevision?:string;
   permissions: string[];
   requiresFactor: boolean;
   requiresPasswordChange: boolean;

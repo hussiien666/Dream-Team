@@ -12,7 +12,7 @@ import { EventsService } from '../events/events.service.js';
 import type { AuthenticatedRequest } from '../common/request.js';
 import { newToken, digest } from '../common/crypto.util.js';
 import { StudentsService } from './students.service.js';
-import { parse, hash, guestSchema } from './validation.js';
+import { parse, hash, guestSchema, studentSchema } from './validation.js';
 import { NotificationsService } from '../email/notifications.service.js';
 import { seal, unseal } from '../common/encryption.util.js';
 
@@ -29,6 +29,9 @@ const guest = guestSchema.omit({
   invitationGroup: true,
 });
 const operation = z.discriminatedUnion('action', [
+  z.object({action:z.literal('register'),requestKey:z.string().regex(/^[A-Za-z0-9_-]{8,80}$/),confirmed:z.literal(true),
+    quantity:z.number().int().min(0).max(50),student:studentSchema.pick({fullName:true,email:true,phone:true,customValues:true}),
+    guests:z.array(guest.extend({id:z.number().int().positive().optional()})).max(50)}).strict(),
   z
     .object({
       action: z.literal('add'),
@@ -244,16 +247,18 @@ export class InvitationLinksService {
         [
           tx.student.findUniqueOrThrow({
             where: { id: link.studentId },
-            select: { fullName: true, guestLimit: true },
+            select: { studentId:true,fullName: true,email:true,phone:true,customValues:true,guestLimit: true },
           }),
           tx.guestInvitation.findMany({
             where: { studentId: link.studentId, eventId: event.id },
             select: {
               id: true,
               active: true,
+              email:true,customValues:true,
               attendee: {
                 select: {
                   fullName: true,
+                  phone:true,categoryId:true,
                   category: { select: { name: true } },
                   tickets: { select: { status: true } },
                 },
@@ -262,9 +267,10 @@ export class InvitationLinksService {
             orderBy: { id: 'asc' },
           }),
           tx.registrationField.findMany({
-            where: { eventId: event.id, target: 'guest', active: true },
+            where: { eventId: event.id, active: true },
             select: {
               key: true,
+              target:true,
               label: true,
               type: true,
               required: true,
@@ -291,12 +297,15 @@ export class InvitationLinksService {
           timezone: event.timezone,
         },
         studentName: student.fullName,
+        student,
         guests,
         fields,
         categories,
         guestLimit:
           student.guestLimit ?? product.perStudentLimit ?? event.maxTickets,
         defaultCategoryId: product.defaultCategoryId ?? null,
+        quantityIncludesStudent:false,
+        maxGuestsPerSubmission:50,
         canAdd:
           !event.registrationDeadline ||
           event.registrationDeadline > new Date(),
@@ -320,8 +329,11 @@ export class InvitationLinksService {
           );
         return old.result;
       }
-      let result: { id: number; action: string };
-      if (dto.action === 'add')
+      let result: Prisma.InputJsonValue;
+      if(dto.action==='register'){
+        if(dto.quantity!==dto.guests.length)throw new BadRequestException('Quantity must match the submitted guest details.');
+        result=await this.students.registerFromInvitation(tx,event,link,dto.student,dto.guests);
+      }else if (dto.action === 'add')
         result = await this.students.addFromInvitation(
           tx,
           event,

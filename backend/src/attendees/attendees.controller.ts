@@ -17,6 +17,7 @@ export class AttendeesController {
     return this.attendeesService.findAll(eventId, req['user'].id, req['orgRole'], req['orgId']);
   }
   @Get('independent') independent(@Param('eventId',ParseIntPipe) e:number,@Req() r:Request){return this.attendeesService.findAll(e,r.user.id,r.orgRole,r.orgId,true);}
+  @Get('independent/page') page(@Param('eventId',ParseIntPipe) e:number,@Query() q:unknown,@Req() r:Request){return this.attendeesService.page(e,r.user.id,r.orgRole,r.orgId,q);}
   @Get('template') async template(@Param('eventId',ParseIntPipe) e:number,@Req() r:Request){return new StreamableFile(await this.imports.template(e,r),{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',disposition:'attachment; filename="attendees.xlsx"'});}
   @Get('export/:format') async exportFile(@Param('eventId',ParseIntPipe) e:number,@Param('format') f:string,@Query() q:unknown,@Req() r:Request){return new StreamableFile(await this.imports.exportFile(e,f,q,r),{type:f==='csv'?'text/csv; charset=utf-8':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',disposition:`attachment; filename="attendees.${f==='csv'?'csv':'xlsx'}"`});}
   @Post('import/preview') @UseInterceptors(RegistrationUploadInterceptor)

@@ -11,6 +11,7 @@ import {registerGmailTests} from './gmail.tests.mjs';
 import {registerFirebaseNativeTests} from './firebase-native.tests.mjs';
 import {registerCommunicationsTests} from './communications.tests.mjs';
 import {registerAttendeeTests} from './attendees.tests.mjs';
+import {registerRegistrationFormTests} from './registration-form.tests.mjs';
 import {registerTurnstileTests} from './turnstile.tests.mjs';
 import 'reflect-metadata';
 import {before, after, test} from 'node:test';
@@ -582,6 +583,20 @@ test('account role edits revoke sessions and rejected self-demotion changes noth
   assert.equal((await request('auth/me',{token:fresh.accessToken})).body.role,'checkin_supervisor');
 });
 
+test('session access revision changes when event assignments change and removed event reads fail closed',async()=>{
+  const user=await adminRequest('users',{body:{username:'revision_manager',displayName:'Revision manager',password:'a-revision-manager-password',orgRole:'event_manager'}});
+  assert.equal(user.status,201);
+  const login=await auth.login('revision_manager','a-revision-manager-password');
+  const before=await request('auth/me',{token:login.accessToken});
+  const event=await adminRequest('events',{body:{...eventInput,name:'Revision isolated event'}});
+  await app.get(UsersService).assignEvent(user.body.id,event.body.id,true,1,1,'super_admin');
+  const added=await request('auth/me',{token:login.accessToken});
+  assert.notEqual(added.body.accessRevision,before.body.accessRevision);assert.match(added.body.accessRevision,/^[a-f0-9]{64}$/);
+  await app.get(UsersService).assignEvent(user.body.id,event.body.id,false,1,1,'super_admin');
+  const removed=await request('auth/me',{token:login.accessToken});assert.equal(removed.body.accessRevision,before.body.accessRevision);
+  assert.equal((await request(`events/${event.body.id}/registrations/page`,{token:login.accessToken})).status,403);
+});
+
 registerStudentTests({test,adminRequest,request,getDb:()=>db,getOrigin:()=>origin,verifiedLogin,getAuth:()=>auth,eventInput});
 registerTicketTests({test,adminRequest,request,getDb:()=>db,getOrigin:()=>origin,verifiedLogin,getApp:()=>app,eventInput});
 registerTemplateTests({test,adminRequest,request,getDb:()=>db,getOrigin:()=>origin,verifiedLogin,getApp:()=>app,eventInput});
@@ -596,6 +611,7 @@ registerGmailTests({test,getApp:()=>app,getDb:()=>db});
 registerTurnstileTests({test,adminRequest,getOrigin:()=>origin,getDb:()=>db,eventInput});
 registerCommunicationsTests({test,adminRequest,getDb:()=>db,getApp:()=>app,eventInput});
 registerAttendeeTests({test,adminRequest,verifiedLogin,getOrigin:()=>origin,getDb:()=>db,eventInput});
+registerRegistrationFormTests({test,adminRequest,request,getDb:()=>db,eventInput});
 
 if(process.env.RUN_REACT_BROWSER==='true')test('React administration works against the real API with 2FA, event/access forms and role isolation',async()=>{
   const {runAdminBrowser}=await import('./react-admin.browser.mjs');

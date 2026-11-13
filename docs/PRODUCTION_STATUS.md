@@ -4,6 +4,16 @@
 
 Implementation checkpoint: `237d294`. No push or hosted release was performed.
 
+## Latest continuation: performance, UI and student quantities
+
+[Sections 2–4 are implemented and verified locally](PERFORMANCE_REGISTRATION.md): 50-row server-filtered cursor lists, deduplication/freshness/limited prefetch, cached background refresh with failure states, access-revision cache/form clearing, responsive controls and the private student/guest form. The student's allowance is event-configured: 1, 2 or 3 guest tickets in total, including existing active guests. Their own student ticket is separate. Owned details/guests can be amended before the deadline; strict server validation, category/event places, idempotency and concurrent quota tests pass. Excel remains available. Existing organizer override semantics remain preserved.
+
+Latest real PostgreSQL/API/Chrome regression: **100 passed, zero failed, three emulator-only skips /103 in 141.6146093 seconds** (`tmp/registration-phase-regression.log`). It covers quantity 1/2/3, whole-batch rollback/retries/concurrent capacity, owned amendments/QR preservation, 50-row pages, retained form input/search focus, mobile/tablet layouts, cached rows during a delayed/failed refresh and closing a private form after remote event-access removal. Frontend contracts: **9/9 in 0.6788169 seconds** (`tmp/registration-admin-unit.log`). Backend/admin builds and both standalone-root/bundled scanner builds pass (`tmp/registration-*-build.log`). Mobile screenshots were visually reviewed.
+
+The 220-student/220-guest fixture's serialized overview was **209,913 bytes**, versus **47,463 bytes** for the guest page (**77.39% smaller**). The latest single local sample was **239.20 ms → 127.65 ms** (`tmp/registration-performance.json`); it is not a stable or hosted benchmark. Eight concurrent identical reads use one request, and another eight fresh reads add none. Mounted visible screens still make bounded freshness/session checks. Zero-minimum-instance Cloud Run cold starts and production load remain unmeasured; no paid warming/cache or billing change was made. Migration 16 adds paging indexes only in QA. Hosted Aiven and the Cloud SQL staging copy remain at migration 11.
+
+Separate final Firebase emulator/API/bridge browser/native mobile/CLI-helper checks: **4 passed, zero failures/skips in 39.6404083 seconds**, `tmp/registration-firebase-final.log`, using workspace Node **24.15.0**. An earlier portable Node 22 attempt hit the disposable Prisma migration setup's sixty-second timeout before authentication assertions (`tmp/registration-firebase.log`); it is not a passing runtime check. Managed Node 22 container build/start/load verification remains outstanding. Emulator/temporary-file cleanup completed. No real email was sent.
+
 ## Delivered locally
 
 - React/Vite administration includes independent attendee CRUD/search/cancellation, CSV/XLSX templates/imports with column matching and per-upload defaults, preview/atomic confirmation, preserved identifiers and exports. Linked student/guest flows, tickets/templates, private links/transfers, reports and staff/access remain operational.
@@ -12,9 +22,9 @@ Implementation checkpoint: `237d294`. No push or hosted release was performed.
 - Announcements review recipient manifests and require confirmation. Global audit history uses immutable organization ownership and pagination/CSV; future historical ownership survives event removal. Old audit records are not rewritten or guessed into an organization.
 - Cloud Run container/service/job and Cloud SQL proxy-socket/pooling/secrets preparation; migration/copy rollback and protection verification. No migrations execute at API startup. Optional transfer PDF-email failures recover to a savepoint and leave a recorded warning while preserving the private mobile-link transaction.
 
-## Final development verification
+## Earlier production-preparation verification
 
-All rows have zero failures. They are development tests, not the incomplete security-audit run.
+These earlier baseline rows have zero failures; the latest continuation results are above. They are development tests, not the incomplete security-audit run.
 
 | Check | Result | Evidence (ignored local logs) |
 | --- | --- | --- |
@@ -33,7 +43,7 @@ The browser checks use real local APIs and disposable PostgreSQL; email transpor
 
 Target: Vercel React admin/scanner -> NestJS Cloud Run -> Cloud SQL PostgreSQL; Firebase Authentication for identities, Workspace Gmail API for outbound application email, Cloudflare DNS. Nest/Prisma accesses PostgreSQL directly; no additional SQL Connect generated connector is required by the application.
 
-The working application still uses Aiven at migration 11. The earlier authorized Cloud SQL development staging copy also has migration 11: 47 tables/279 rows, schema/protection fingerprints, canonical row hashes, microseconds, IDs, QR/encryption/history and backup round-trip verified. It is not failover or approved cutover. Migrations 12-15 exist only in disposable QA databases. Original Streamlit/SQLite and existing hosted frontends/API remain unchanged.
+The working application still uses Aiven at migration 11. The earlier authorized Cloud SQL development staging copy also has migration 11: 47 tables/279 rows, schema/protection fingerprints, canonical row hashes, microseconds, IDs, QR/encryption/history and backup round-trip verified. It is not failover or approved cutover. Migrations 12-16 exist only in disposable QA databases. Original Streamlit/SQLite and existing hosted frontends/API remain unchanged.
 
 ## Runtime values and secrets
 

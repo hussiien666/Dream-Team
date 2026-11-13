@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { InvitationLinkDialog } from "./invitations";
 import type { Client } from "./api";
 import type { EventRecord, Identity } from "./types";
@@ -10,6 +10,7 @@ import {
   Empty,
   useAction,
   useResource,
+  useDebounced,usePage,PageControls,RefreshState,
 } from "./ui";
 type Values = Record<string, string | number | boolean | null>;
 type RegistrationField = {
@@ -62,6 +63,7 @@ type Overview = {
   fields: RegistrationField[];
   limits: Limits;
   categories: { id: number; name: string; code: string; active: boolean }[];
+  nextAfter?:number|null;
 };
 type Preview = {
   previewHash: string;
@@ -90,8 +92,7 @@ export function StudentsPage({
   event: EventRecord;
   identity: Identity;
 }) {
-  const base = prefix(event.id),
-    data = useResource<Overview>(api, base + "/registrations");
+  const base = prefix(event.id);
   const [tab, setTab] = useState<"students" | "guests" | "fields">("students"),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("active"),
@@ -109,6 +110,9 @@ export function StudentsPage({
     [limits, setLimits] = useState(false),
     [message, setMessage] = useState("");
   const [linkStudent, setLinkStudent] = useState<Student>();
+  const debounced=useDebounced(search),query=`kind=${tab==='guests'?'guests':'students'}&status=${filter}&search=${encodeURIComponent(debounced)}${studentFilter&&tab==='guests'?'&studentId='+studentFilter:''}`;
+  const page=usePage(query),pagePath=base+'/registrations/page?'+query,data=useResource<Overview>(api,pagePath+(page.after?'&after='+page.after:''));
+  useEffect(()=>{if(data.data?.nextAfter)api.prefetch(pagePath+'&after='+data.data.nextAfter);},[api,pagePath,data.data?.nextAfter]);
   const a = useAction();
   const refresh = () => {
     data.reload();
@@ -134,16 +138,7 @@ export function StudentsPage({
   const show = (name: string, active: boolean) =>
     name.toLowerCase().includes(search.toLowerCase()) &&
     (filter === "all" || (filter === "active" ? active : !active));
-  if (data.loading) return <Loading />;
-  if (!data.data)
-    return (
-      <>
-        <h1>Students & Invitations</h1>
-        <Notice error={data.error} />
-        <button onClick={refresh}>Try again</button>
-      </>
-    );
-  const d = data.data;
+  const d:Overview = data.data ?? {students:[],guests:[],fields:[],categories:[],limits:{guestLimit:0,perStudentLimit:0,defaultCategoryId:null,categoryLimits:[]}};
   return (
     <>
       <div className="page-heading">
@@ -157,9 +152,9 @@ export function StudentsPage({
         <p className="notice">Archived event: registrations are read-only.</p>
       )}
       <p>
-        Students send invitations. Guests are their linked attendees. Manage ticket generation and delivery under Tickets.
+        Share each eligible student's private registration form so they can enter their details and guests. Excel import remains available for compatibility. Guest quantities follow the configured per-student allowance; student tickets are separate.
       </p>
-      <Notice error={a.error} />
+      <Notice error={a.error||data.error} />{data.loading&&<Loading/>}<RefreshState refreshing={data.refreshing} error={data.error} hasData={!!data.data}/>
       {message && (
         <p className="notice" role="status">
           {message}
@@ -173,7 +168,7 @@ export function StudentsPage({
           Import Excel
         </button>
         {canManage && (
-          <button onClick={() => setLimits(true)} disabled={readonly}>
+          <button onClick={() => setLimits(true)} disabled={readonly||data.loading}>
             Invitation limits
           </button>
         )}
@@ -202,6 +197,7 @@ export function StudentsPage({
         </button>
       </div>
       {linkStudent && <InvitationLinkDialog api={api} eventId={event.id} student={linkStudent} close={() => setLinkStudent(undefined)}/>}
+      {tab !=='fields'&&<PageControls page={page} next={d.nextAfter} busy={data.loading}/>}
       {tab !== "fields" ? (
         <>
           <div className="toolbar">
@@ -210,6 +206,7 @@ export function StudentsPage({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Name, ID, email or phone"
+                maxLength={200}
               />
             </Field>
             <Field label="Registration status">
@@ -225,7 +222,7 @@ export function StudentsPage({
             </Field>
             <button
               className="primary"
-              disabled={readonly}
+              disabled={readonly||data.loading}
               onClick={() =>
                 setEdit({ kind: tab === "students" ? "student" : "guest" })
               }
@@ -629,6 +626,9 @@ function RegistrationForm({
   const [customValues, setValues] = useState<Values>(
     record?.customValues ?? {},
   );
+  const [studentSearch,setStudentSearch]=useState(''),term=useDebounced(studentSearch);
+  const choices=useResource<Overview>(api,base+'/registrations/page?kind=students&status=active&search='+encodeURIComponent(term));
+  const studentChoices=g?d.students:(choices.data?.students??d.students);
   return (
     <Dialog
       title={(record ? "Edit " : "Add ") + kind}
@@ -694,6 +694,7 @@ function RegistrationForm({
             </Field>
           ) : (
             <Field label="Student">
+              {!g&&<input aria-label="Search inviting student" value={studentSearch} onChange={e=>setStudentSearch(e.target.value)} maxLength={200} placeholder="Search student name or ID"/>}
               <select
                 aria-label="Student"
                 name="student"
@@ -702,7 +703,7 @@ function RegistrationForm({
                 disabled={!!g}
               >
                 <option value="">Choose student</option>
-                {d.students
+                {studentChoices
                   .filter((s) => s.active)
                   .map((s) => (
                     <option value={s.id} key={s.id}>

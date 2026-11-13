@@ -9,6 +9,7 @@
   ParseIntPipe,
   UseGuards,
   BadRequestException,
+  Query,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { z } from 'zod';
@@ -46,6 +47,8 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 @UseGuards(JwtAuthGuard)
 export class TicketsController {
   constructor(private readonly service: TicketsService) {}
+  @Get('page') page(@Param('eventId',ParseIntPipe) e:number,@Query() q:unknown,@Req() r:Request){return this.service.findAll(e,r.user.id,r.orgRole,r.orgId,q);}
+  @Get('candidates/page') candidatePage(@Param('eventId',ParseIntPipe) e:number,@Query() q:unknown,@Req() r:Request){return this.service.candidates(e,r.user.id,r.orgRole,r.orgId,q);}
   @Get() list(@Param('eventId', ParseIntPipe) e: number, @Req() r: Request) {
     return this.service.findAll(e, r.user.id, r.orgRole, r.orgId);
   }

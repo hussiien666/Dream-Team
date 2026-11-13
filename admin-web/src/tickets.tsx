@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { Client } from "./api";
 import type { EventRecord } from "./types";
 import { DeliveryPanel, SendTickets } from "./delivery";
@@ -10,6 +10,7 @@ import {
   Notice,
   useAction,
   useResource,
+  usePage,useDebounced,PageControls,RefreshState,
 } from "./ui";
 type Ticket = {
   id: number;
@@ -49,9 +50,7 @@ export function TicketsPage({
   event: EventRecord;
   isSuperAdmin?: boolean;
 }) {
-  const base = `events/${event.id}/tickets`,
-    rows = useResource<Ticket[]>(api, base),
-    candidates = useResource<Candidate[]>(api, base + "/candidates");
+  const base = `events/${event.id}/tickets`;
   const a = useAction(),
     [search, setSearch] = useState(""),
     [selected, setSelected] = useState<number[]>([]),
@@ -64,6 +63,15 @@ export function TicketsPage({
     [send, setSend] = useState(false),
     [student, setStudent] = useState(""),
     [group, setGroup] = useState("");
+  const [candidateSearch,setCandidateSearch]=useState('');
+  const term=useDebounced(search),candidateTerm=useDebounced(candidateSearch),rowPath=base+'/page?search='+encodeURIComponent(term),
+    candidatePath=base+'/candidates/page?search='+encodeURIComponent(candidateTerm)+(student?'&studentId='+student:'')+(group?'&group='+encodeURIComponent(group):'');
+  const rowPage=usePage(rowPath),candidatePage=usePage(candidatePath),rowResource=useResource<{rows:Ticket[];nextAfter:number|null}>(api,rowPath+(rowPage.after?'&after='+rowPage.after:'')),
+    candidateResource=useResource<{rows:Candidate[];nextAfter:number|null}>(api,candidatePath+(candidatePage.after?'&after='+candidatePage.after:''));
+  const rows={...rowResource,data:rowResource.data?.rows},candidates={...candidateResource,data:candidateResource.data?.rows};
+  useEffect(()=>{if(rowResource.data?.nextAfter)api.prefetch(rowPath+'&after='+rowResource.data.nextAfter);},[api,rowPath,rowResource.data?.nextAfter]);
+  useEffect(()=>{if(candidateResource.data?.nextAfter)api.prefetch(candidatePath+'&after='+candidateResource.data.nextAfter);},[api,candidatePath,candidateResource.data?.nextAfter]);
+  useEffect(()=>{setSelected([]);setDownloads([]);setKey(crypto.randomUUID());},[rowPage.after,candidatePage.after,term,student,group,candidateTerm]);
   const [preview, setPreview] = useState(false),
     [result, setResult] = useState(""),
     [operation, setOperation] = useState<{ ticket: Ticket; action: string }>();
@@ -118,6 +126,8 @@ export function TicketsPage({
         unused tickets.
       </p>
       <Notice error={rows.error || candidates.error || a.error} />
+      <RefreshState refreshing={rows.refreshing} error={rows.error} hasData={!!rows.data}/>
+      <PageControls page={rowPage} next={rowResource.data?.nextAfter} busy={rows.loading}/>
       {result && <p role="status">{result}</p>}
       <div className="toolbar">
         <Field label="Search tickets">
@@ -333,6 +343,9 @@ export function TicketsPage({
       {issuable && (
         <section className="plain-section">
           <h2>Generate tickets</h2>
+          <Field label="Search registrations for tickets"><input value={candidateSearch} onChange={e=>setCandidateSearch(e.target.value)} maxLength={200} placeholder="Guest, student name/ID or group"/></Field>
+          <RefreshState refreshing={candidates.refreshing} error={candidates.error} hasData={!!candidates.data}/>
+          <PageControls page={candidatePage} next={candidateResource.data?.nextAfter} busy={candidates.loading}/>
           <div className="toolbar">
             <Field label="Inviting student">
               <select

@@ -5,6 +5,13 @@ export class ApiError extends Error {
     this.status = status;
   }
 }
+export class SupersededRequest extends Error {}
+export function freshness(path:string){
+  if(/(?:^|\/)(tickets|users)(?:[/?]|$)/.test(path))return 5000;
+  if(/(?:categories|entrances|registration-options|templates)/.test(path))return 60000;
+  if(path==='events'||path.endsWith('/settings'))return 30000;
+  return 10000;
+}
 export function apiBase(value: string) {
   if (!value) return "/api/v1";
   const url = new URL(value);
@@ -33,6 +40,9 @@ export class Client {
   private resources = new Map<string, { value: unknown; at: number }>();
   private pending = new Map<string, Promise<unknown>>();
   private generation = 0;
+  private listeners=new Set<(reason:string)=>void>();
+  subscribe(listener:(reason:string)=>void){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
+  private emit(reason:string){for(const listener of this.listeners)listener(reason);}
   constructor(base: string, token = "", expired = () => {}) {
     this.base = apiBase(base);
     this.token = token;
@@ -42,14 +52,16 @@ export class Client {
   // never persisted to browser storage or used to make authorization decisions.
   peekResource<T>(path: string): { data: T; fresh: boolean } | undefined {
     const item = this.resources.get(path);
-    if (!item || Date.now() - item.at > 120000) return undefined;
-    return { data: item.value as T, fresh: Date.now() - item.at < 10000 };
+    if (!item || Date.now() - item.at > 300000) return undefined;
+    return { data: item.value as T, fresh: Date.now() - item.at < freshness(path) };
   }
-  clearResources() {
+  clearResources(reason='authorization') {
     this.generation++;
     this.resources.clear();
     this.pending.clear();
+    this.emit(reason);
   }
+  prefetch(path:string){if(!path.startsWith('auth/')&&!path.startsWith('public/'))void this.resource(path).catch(()=>{});}
   setBearerProvider(provider: () => Promise<string>) {
     this.clearResources();
     this.bearerProvider = provider;
@@ -63,6 +75,7 @@ export class Client {
     if (inFlight) return inFlight as Promise<T>;
     const generation = this.generation;
     const promise = this.request<T>(path).then((value) => {
+      if(this.generation!==generation)throw new SupersededRequest('This response was superseded.');
       if (this.generation === generation) {
         if (this.resources.size >= 100) this.resources.delete(this.resources.keys().next().value!);
         this.resources.set(path, { value, at: Date.now() });
@@ -87,10 +100,10 @@ export class Client {
     const [route, query, extra] = path.split("?");
     if (
       !/^[a-z0-9][a-z0-9_/.-]*$/i.test(route) || route.includes("..") || route.includes("//") || extra !== undefined ||
-      (query !== undefined && (!/^[a-z0-9_%=&.+~-]*$/i.test(query) || /%(?![a-f0-9]{2})/i.test(query)))
+      (query !== undefined && (!/^[a-z0-9_%=&.+~'()!*-]*$/i.test(query) || /%(?![a-f0-9]{2})/i.test(query)))
     )
       throw new Error("Invalid API path.");
-    if (method !== "GET") this.clearResources();
+    if (method !== "GET") { this.generation++;this.pending.clear(); }
     const bearer = this.bearerProvider ? await this.bearerProvider() : this.token;
     const response = await fetch(this.base + "/" + path, {
       method,
@@ -117,19 +130,21 @@ export class Client {
             ? body
             : JSON.stringify(body),
     }).catch((error) => {
+      if(method!=='GET')this.clearResources('mutation');
       if (error.name === "AbortError") throw error;
       throw new ApiError(
         "The server could not be reached. Check your connection and try again.",
         0,
       );
     });
+    if(method!=='GET')this.clearResources('mutation');
     if (response.ok && asBlob) return (await response.blob()) as T;
     if (response.status === 204) return undefined as T;
     const value = await response.json().catch(() => null);
     if (response.ok && value === null)
       throw new ApiError("The server returned an unreadable response.", 502);
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) this.clearResources();
+      if (response.status === 401 || response.status === 403) this.clearResources('denied');
       if (response.status === 401 && this.token) this.expired();
       const message = Array.isArray(value?.message)
         ? value.message.join("; ")

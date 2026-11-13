@@ -27,6 +27,7 @@ import { readWorkbook, makeTemplate } from './workbook.js';
 import type { RowError } from './workbook.js';
 import {TicketsService} from '../tickets/tickets.service.js';
 import { NotificationsService } from '../email/notifications.service.js';
+import { listPage,pageResult } from '../common/list-page.js';
 type Tx = Prisma.TransactionClient;
 type Actor = Pick<AuthenticatedRequest, 'user' | 'orgRole' | 'orgId'>;
 type PublicPrincipal = { linkId: number; orgId: number };
@@ -174,6 +175,22 @@ export class StudentsService {
       limits,
       categories,
     };
+  }
+  async page(eventId:number,a:Actor,query:unknown){
+    await this.access(eventId,a);const q=listPage(query),kind=q.kind??'students';
+    const active=q.status==='all'?{}:{active:q.status==='active'||q.status==='Registered'};
+    const studentWhere:Prisma.StudentWhereInput={eventId,...active,...(q.after?{id:{gt:q.after}}:{}),...(q.search?{OR:[
+      {fullName:{contains:q.search,mode:'insensitive'}},{studentId:{contains:q.search,mode:'insensitive'}},{email:{contains:q.search,mode:'insensitive'}},{phone:{contains:q.search}}]}:{})};
+    const guestWhere:Prisma.GuestInvitationWhereInput={eventId,...active,...(q.after?{id:{gt:q.after}}:{}),...(q.studentId?{studentId:q.studentId}:{}),...(q.search?{OR:[
+      {attendee:{fullName:{contains:q.search,mode:'insensitive'}}},{email:{contains:q.search,mode:'insensitive'}},{attendee:{phone:{contains:q.search}}},{student:{studentId:{contains:q.search,mode:'insensitive'}}}]}:{})};
+    const rawStudents=kind==='students'?await this.db.student.findMany({where:studentWhere,take:51,orderBy:{id:'asc'},include:{_count:{select:{guests:true}}}}):[];
+    const rawGuests=kind==='guests'?await this.db.guestInvitation.findMany({where:guestWhere,take:51,orderBy:{id:'asc'},include:guestInclude}):[];
+    const page=pageResult<{id:number}>(kind==='students'?rawStudents:rawGuests);
+    const students=kind==='students'?rawStudents.slice(0,50):await this.db.student.findMany({where:{eventId,id:{in:[...new Set(rawGuests.slice(0,50).map(g=>g.studentId))]}},include:{_count:{select:{guests:true}}}});
+    const [counts,fields,limits,categories]=await Promise.all([
+      this.db.guestInvitation.groupBy({by:['studentId'],where:{eventId,active:true,studentId:{in:students.map(s=>s.id)}},_count:{_all:true}}),this.fields(this.db,eventId),this.limits(this.db,eventId),
+      this.db.ticketCategory.findMany({where:{eventId},select:{id:true,name:true,code:true,active:true}})]);
+    return {students:students.map(s=>({...s,guestCount:counts.find(c=>c.studentId===s.id)?._count._all??0})),guests:rawGuests.slice(0,50),fields,limits,categories,nextAfter:page.nextAfter};
   }
   async list(eventId: number, a: Actor, kind: 'students' | 'guests') {
     return (await this.overview(eventId, a))[kind];
@@ -696,8 +713,59 @@ export class StudentsService {
     const principal: PublicPrincipal = { linkId: link.id, orgId: (await tx.organizationEvent.findUniqueOrThrow({ where: { eventId: event.id } })).organizationId };
     const plan = await this.plan(tx, event, [], [{ sheet: 'Guests', row: 0, mode: 'create', data: { ...dto, studentId: link.studentId } }], principal);
     this.noErrors(plan.errors);
+    await this.publicCapacity(tx,event,plan.guests);
     await this.apply(tx, event, principal, plan);
     return { id: plan.guests[0].id, action: 'created' };
+  }
+  /** Capability scope is established by the caller under the same event lock. */
+  async registerFromInvitation(tx:Tx,event:Event,link:{id:number;studentId:number},student:unknown,guests:{id?:number;[key:string]:unknown}[]) {
+    if(event.registrationDeadline&&event.registrationDeadline<=new Date())throw new BadRequestException('The registration deadline has passed.');
+    const owned=await tx.guestInvitation.findMany({where:{eventId:event.id,studentId:link.studentId,active:true},select:{id:true}});
+    const ids=guests.flatMap(g=>g.id?[g.id]:[]);
+    if(new Set(ids).size!==ids.length||ids.some(id=>!owned.some(g=>g.id===id)))throw new NotFoundException('Guest not found for this invitation.');
+    const old=await tx.student.findUniqueOrThrow({where:{id:link.studentId}});
+    const profile=parse(studentSchema.pick({fullName:true,email:true,phone:true,customValues:true}),student);
+    const principal:PublicPrincipal={linkId:link.id,orgId:(await tx.organizationEvent.findUniqueOrThrow({where:{eventId:event.id}})).organizationId};
+    const plan=await this.plan(tx,event,[{sheet:'Students',row:0,id:old.id,mode:'update',data:{...profile,studentId:old.studentId}}],
+      guests.map((g,i)=>{const {id,...data}=g;return {sheet:'Guests',row:i+1,id,mode:id?'update' as const:'create' as const,data:{...data,studentId:link.studentId}};}),principal);
+    this.noErrors(plan.errors);
+    // A checked-in identity and its printed/admission history cannot be amended by a bearer link.
+    if(plan.guests.some(g=>g.tickets?.some((t:{status:string;checkIn:unknown})=>t.status==='Used'||t.checkIn)))
+      throw new BadRequestException('Checked-in guests cannot be amended through this form. Contact the organizer.');
+    for(const g of plan.guests)if(!g.isNew){
+      const oldGuest=await tx.attendee.findUniqueOrThrow({where:{id:g.attendeeId}});
+      if(oldGuest.categoryId!==g.categoryId&&g.tickets.some((t:{status:string})=>['Active','Used'].includes(t.status)))
+        throw new BadRequestException('Contact the organizer to change category after ticket issuance.');
+    }
+    await this.publicCapacity(tx,event,plan.guests);
+    await this.apply(tx,event,principal,plan);
+    return {action:'registered',quantity:guests.length,guestIds:plan.guests.map(g=>g.id)};
+  }
+  private async publicCapacity(tx:Tx,event:Event,changes:{isNew:boolean;attendeeId?:number;categoryId:number}[]) {
+    // Reserve at least one place per active registration. Existing live/used tickets
+    // remain counted even after cancellation or category edits; do not double-count them.
+    const reservations=await tx.$queryRaw<{attendee_id:number;category_id:number;places:bigint}[]>`
+      WITH live AS (SELECT attendee_id,category_id,count(*) AS places FROM tickets
+        WHERE event_id=${event.id} AND status IN ('Active','Used') GROUP BY attendee_id,category_id)
+      SELECT attendee_id,category_id,places FROM live
+      UNION ALL SELECT a.id,a.category_id,1::bigint FROM attendees a WHERE a.event_id=${event.id}
+        AND a.status='Registered' AND NOT EXISTS (SELECT 1 FROM live l WHERE l.attendee_id=a.id AND l.category_id=a.category_id)`;
+    const counts=new Map<number,number>();let total=0;
+    for(const row of reservations){const n=Number(row.places);total+=n;counts.set(row.category_id,(counts.get(row.category_id)??0)+n);}
+    const beforeTotal=total,before=new Map(counts);
+    for(const g of changes){
+      if(!g.isNew){
+        const prior=await tx.attendee.findUniqueOrThrow({where:{id:g.attendeeId!}});
+        if(prior.categoryId===g.categoryId)continue;
+        const retained=await tx.ticket.count({where:{attendeeId:prior.id,categoryId:prior.categoryId,status:{in:['Active','Used']}}});
+        if(!retained){counts.set(prior.categoryId,(counts.get(prior.categoryId)??0)-1);total--;}
+      }
+      counts.set(g.categoryId,(counts.get(g.categoryId)??0)+1);total++;
+    }
+    if(total>Math.min(event.capacity,event.maxTickets)&&total>beforeTotal)throw new BadRequestException('Event registration capacity has been reached.');
+    const categories=await tx.ticketCategory.findMany({where:{eventId:event.id}});
+    for(const c of categories)if((counts.get(c.id)??0)>c.allocation&&(counts.get(c.id)??0)>(before.get(c.id)??0))
+      throw new BadRequestException(`${c.name} registration allocation has been reached.`);
   }
   async impact(eventId: number, id: number, a: Actor) {
     await this.access(eventId, a);

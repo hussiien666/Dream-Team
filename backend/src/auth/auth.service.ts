@@ -16,6 +16,10 @@ export type Identity = { user: {id: number; username: string; displayName: strin
 export class AuthService {
   constructor(private readonly prisma: PrismaService, @Optional() private readonly notifications?: NotificationsService) {}
   private dummy = argon2.hash(randomBytes(32), { type: argon2.argon2id });
+  async accessRevision(identity:Pick<Identity,'user'|'orgRole'|'orgId'>){
+    const grants=identity.orgRole==='super_admin'?[]:await this.prisma.eventAssignment.findMany({where:{userId:identity.user.id,organizationId:identity.orgId},select:{eventId:true},orderBy:{eventId:'asc'}});
+    return digest(JSON.stringify([identity.orgId,identity.orgRole,grants]));
+  }
 
   validatePassword(password: string) {
     if (typeof password !== 'string' || password.length < 12 || password.length > 256) throw new BadRequestException('Use a password between 12 and 256 characters.');

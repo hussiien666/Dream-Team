@@ -12,3 +12,9 @@ body{min-height:100dvh;padding:env(safe-area-inset-top) env(safe-area-inset-righ
 dialog{max-height:calc(100dvh - 32px)}
 input,select,textarea{max-width:100%}.tabs{flex-wrap:wrap}
 @media(max-width:850px){.shell{flex-direction:column}.shell>aside{flex-basis:auto}.event-grid{grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))}.auth{width:min(100%,760px)}dialog{padding:18px}.account{flex-wrap:wrap}}
+
+/* Table pagination stays horizontal without inheriting sidebar navigation rules. */
+.page-controls{display:flex;flex-direction:row;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0}
+.workspace,.field,fieldset{min-width:0}.field input,.field select,.field textarea{width:100%}
+.skip-link{position:fixed;top:8px;left:8px;z-index:1000;padding:10px;background:#fff;transform:translateY(-150%)}.skip-link:focus{transform:none}
+@media(max-width:850px){button,input,select{min-height:44px}.topbar{flex-wrap:wrap}.topbar label{min-width:0;width:100%}.topbar select{min-width:0;max-width:100%;flex:1}dialog fieldset{padding:12px}.content{padding:20px 16px}.public-invitation table{min-width:520px}}

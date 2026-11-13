@@ -62,6 +62,20 @@ export async function runAdminBrowser({origin,auth,db,recoveryCode}){
     await page.getByRole('row').filter({hasText:'Imported browser guest'}).waitFor();assert.equal(await db.student.count({where:{eventId:event.id}}),2);assert.equal(await db.guestInvitation.count({where:{eventId:event.id}}),2);
     const importedStudent=await db.student.findFirst({where:{eventId:event.id,studentId:'00043'}});assert.equal(importedStudent.phone,'00123456788');
     await page.getByRole('row').filter({hasText:'Imported browser guest'}).getByRole('button',{name:'Cancel guest'}).click();dialog=page.getByRole('dialog',{name:'Cancel guest',exact:true});await dialog.getByLabel('Cancellation reason').fill('Browser cancellation verification');await dialog.getByLabel('I confirm cancellation').check();await dialog.getByRole('button',{name:'Confirm cancellation'}).click();await dialog.waitFor({state:'hidden'});await page.getByLabel('Registration status',{exact:true}).selectOption('all');await page.getByRole('row').filter({hasText:'Imported browser guest'}).getByText('Cancelled',{exact:true}).waitFor();
+    // Keep a populated table visible while a refresh is pending and after a transient failure.
+    let releaseRefresh;const heldRefresh=new Promise(resolve=>releaseRefresh=resolve);
+    const registrationRoute=url=>url.href.startsWith(origin+`/api/v1/events/${event.id}/registrations/page?`);
+    const failedRefresh=async route=>{await heldRefresh;await route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({message:'Synthetic refresh unavailable'})});};
+    await page.route(registrationRoute,failedRefresh);await page.getByRole('button',{name:'Refresh',exact:true}).click();
+    await page.getByRole('status').filter({hasText:'Showing saved data while refreshing'}).waitFor();
+    await page.getByRole('row').filter({hasText:'Updated browser guest'}).waitFor();releaseRefresh();
+    await page.getByRole('status').filter({hasText:'Refresh failed. Showing previously loaded data'}).waitFor();
+    await page.getByRole('row').filter({hasText:'Updated browser guest'}).waitFor();await page.unroute(registrationRoute,failedRefresh);
+    await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.getByRole('alert').waitFor({state:'hidden'});
+    const search=page.getByLabel('Search registrations',{exact:true});await search.fill('Updated browser guest');
+    await page.waitForResponse(r=>r.url().includes('/registrations/page?')&&r.url().includes('search=Updated')&&r.status()===200);
+    assert.ok(await search.evaluate(el=>el===document.activeElement),'Searching must retain keyboard focus while its page loads');
+    await search.fill('');await page.getByRole('row').filter({hasText:'Imported browser guest'}).waitFor();
     await db.event.update({where:{id:event.id},data:{status:'Upcoming'}});
     await page.goto(`${webOrigin}/events/${event.id}/tickets`);
     await page.getByRole('heading',{name:'Tickets',exact:true}).waitFor();
@@ -108,6 +122,8 @@ export async function runAdminBrowser({origin,auth,db,recoveryCode}){
     dialog=page.getByRole('dialog',{name:'Personal invitation link',exact:true});await dialog.getByLabel('Link action reason').fill('Browser personal invitation test');await dialog.getByLabel('I confirm that existing links will stop working',{exact:true}).check();await dialog.getByRole('button',{name:'Create replacement link',exact:true}).click();
     const publicUrl=await dialog.getByLabel('Private invitation URL').inputValue();assert.ok(publicUrl.startsWith(webOrigin+'/invitation#DEI1.'));
     const publicContext=await browser.newContext({viewport:{width:430,height:932}}), publicPage=await publicContext.newPage();let adminCalls=0;
+    const publicSettings=await db.eventSetting.findUniqueOrThrow({where:{eventId_key:{eventId:event.id,key:'product.v1'}}});
+    await db.eventSetting.update({where:{eventId_key:{eventId:event.id,key:'product.v1'}},data:{value:JSON.stringify({...JSON.parse(publicSettings.value),perStudentLimit:3})}});
     Object.assign(process.env, { TURNSTILE_ENABLED: 'true', TURNSTILE_SITE_KEY: 'synthetic-browser-site', TURNSTILE_SECRET_KEY: 'synthetic-browser-secret', TURNSTILE_HOSTNAMES: '127.0.0.1' });
     let acceptChallenge = false;
     globalThis.fetch = async (url, options) => String(url) === 'https://challenges.cloudflare.com/turnstile/v0/siteverify'
@@ -130,6 +146,24 @@ export async function runAdminBrowser({origin,auth,db,recoveryCode}){
     const invitationResponse = await savedInvitation;assert.equal(invitationResponse.status(), 200, await invitationResponse.text());
     await guestDialog.waitFor({state:'hidden'});
     await publicPage.getByRole('row').filter({hasText:'Public browser guest'}).getByRole('button',{name:'Cancel invitation',exact:true}).click();guestDialog=publicPage.getByRole('dialog',{name:'Cancel guest invitation'});await guestDialog.getByLabel('Cancellation reason').fill('Public browser cancellation');await guestDialog.getByLabel('I confirm cancellation',{exact:true}).check();await guestDialog.getByRole('button',{name:'Complete synthetic security check',exact:true}).click();await guestDialog.getByRole('button',{name:'Confirm cancellation',exact:true}).click();await guestDialog.waitFor({state:'hidden'});await publicPage.getByRole('row').filter({hasText:'Public browser guest'}).getByRole('cell',{name:'Cancelled',exact:true}).waitFor();
+    await publicPage.getByRole('button',{name:'Open registration form',exact:true}).click();guestDialog=publicPage.getByRole('dialog',{name:'Student and guest registration'});
+    await guestDialog.getByLabel('Guest ticket quantity to add',{exact:true}).selectOption('2');
+    assert.deepEqual(await guestDialog.getByLabel('Guest ticket quantity to add',{exact:true}).locator('option').allTextContents(),['0','1','2']);
+    await guestDialog.getByLabel('Your full name',{exact:true}).fill('Self-service browser sender');
+    for(let i=1;i<=2;i++){await guestDialog.getByLabel(`Guest ${i} name`,{exact:true}).fill(`Batch browser guest ${i}`);await guestDialog.getByLabel(`Guest ${i} email`,{exact:true}).fill(`batch-browser-${i}@example.test`);await guestDialog.getByLabel(`Guest ${i} category`,{exact:true}).selectOption({label:'Guest'});}
+    await guestDialog.getByLabel('I reviewed my details and every guest',{exact:true}).check();await guestDialog.getByRole('button',{name:'Complete synthetic security check',exact:true}).click();
+    assert.ok(await publicPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+    mkdirSync(path.resolve('../tmp/browser-tests'),{recursive:true});await publicPage.screenshot({path:path.resolve('../tmp/browser-tests/registration-quantity-mobile.png')});
+    await publicPage.setViewportSize({width:820,height:1180});assert.ok(await publicPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await publicPage.setViewportSize({width:430,height:932});
+    await guestDialog.getByRole('button',{name:'Confirm registration',exact:true}).click();await guestDialog.waitFor({state:'hidden'});
+    await publicPage.getByRole('row').filter({hasText:'Batch browser guest 2'}).waitFor();
+    await publicPage.getByRole('row').filter({hasText:'Batch browser guest 1'}).getByRole('button',{name:'Edit guest',exact:true}).click();guestDialog=publicPage.getByRole('dialog',{name:'Amend guest registration'});
+    await guestDialog.getByLabel('Guest 1 name',{exact:true}).fill('Amended batch browser guest');await guestDialog.getByLabel('I reviewed my details and every guest',{exact:true}).check();
+    await guestDialog.getByRole('button',{name:'Complete synthetic security check',exact:true}).click();await guestDialog.getByRole('button',{name:'Confirm registration',exact:true}).click();await guestDialog.waitFor({state:'hidden'});
+    await publicPage.getByRole('row').filter({hasText:'Amended batch browser guest'}).waitFor();
+    await publicPage.getByRole('button',{name:'Open registration form',exact:true}).click();guestDialog=publicPage.getByRole('dialog',{name:'Student and guest registration'});
+    assert.deepEqual(await guestDialog.getByLabel('Guest ticket quantity to add',{exact:true}).locator('option').allTextContents(),['0']);
+    await guestDialog.getByRole('button',{name:'Close dialog',exact:true}).click();
     globalThis.fetch = originalFetch;
     for (const [key, value] of Object.entries(turnstileEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     assert.ok(await publicPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));mkdirSync(path.resolve('../tmp/browser-tests'),{recursive:true});await publicPage.screenshot({path:path.resolve('../tmp/browser-tests/dream-invitation-mobile.png')});
@@ -167,6 +201,12 @@ export async function runAdminBrowser({origin,auth,db,recoveryCode}){
     await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByRole('dialog',{name:'Sign out',exact:true}).getByRole('button',{name:'Confirm'}).click();await page.getByRole('heading',{name:'Administrator sign in'}).waitFor();
     await page.getByLabel('Username',{exact:true}).fill('test_manager');await page.getByLabel('Password',{exact:true}).fill('a-manager-test-password');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.getByRole('heading',{name:'Events',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Add event',exact:true}).count(),0);
     await page.goto(`${webOrigin}/events/${event.id}/settings`);await page.getByRole('heading',{name:'Page unavailable'}).waitFor();
+    const assigned=await db.eventAssignment.findFirst({where:{user:{username:'test_manager'},event:{archived:false}},include:{event:true}});assert.ok(assigned);
+    await page.goto(`${webOrigin}/events/${assigned.eventId}/students`);await page.getByRole('heading',{name:'Students & Invitations',exact:true}).waitFor();
+    await page.getByRole('button',{name:'Add student',exact:true}).click();await page.getByRole('dialog',{name:'Add student',exact:true}).waitFor();
+    await page.clock.install();await db.eventAssignment.delete({where:{userId_eventId:{userId:assigned.userId,eventId:assigned.eventId}}});
+    await page.clock.fastForward(31000);await page.getByRole('heading',{name:'Page unavailable'}).waitFor();
+    assert.equal(await page.getByRole('dialog',{name:'Add student',exact:true}).count(),0,'Permission changes must discard open private forms');
     await page.evaluate(()=>sessionStorage.setItem('dream-events-admin-token','x'.repeat(43)));await page.reload();await page.getByRole('heading',{name:'Administrator sign in'}).waitFor();
     await page.close();
   }catch(error){if(page){mkdirSync(path.resolve('../tmp/browser-tests'),{recursive:true});await page.screenshot({path:path.resolve('../tmp/browser-tests/dream-admin-failure.png')}).catch(()=>{});console.error('Synthetic browser failure screen: '+(await page.locator('body').innerText().catch(()=>'' )).slice(0,2500));}throw error;}finally{globalThis.fetch = originalFetch;for (const [key, value] of Object.entries(turnstileEnv)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }if(browser)await browser.close();child.kill('SIGTERM');}

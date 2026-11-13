@@ -15,6 +15,7 @@ import { generateMobileTicket } from './ticket-engine/mobile.util.js';
 import { eventDesign } from './ticket-engine/design.js';
 import { ticketZip } from './ticket-engine/zip.js';
 import { DeliveryService } from './delivery.service.js';
+import { listPage,pageResult } from '../common/list-page.js';
 type Tx = Prisma.TransactionClient;
 const live = ['Active', 'Used'] as const;
 const ticketView = {
@@ -35,7 +36,7 @@ export class TicketsService {
     private readonly delivery: DeliveryService,
   ) {}
 
-  async findAll(eventId: number, userId: number, role: string, orgId: number) {
+  async findAll(eventId: number, userId: number, role: string, orgId: number,query?:unknown) {
     await this.events.assertAccess(
       eventId,
       userId,
@@ -43,26 +44,29 @@ export class TicketsService {
       orgId,
       'tickets.manage',
     );
+    const q=query===undefined?undefined:listPage(query);
     const rows = await this.prisma.ticket.findMany({
-      where: { eventId },
+      where: { eventId,...(q?.after?{id:{gt:q.after}}:{}),...(q?.search?{OR:[{number:{contains:q.search,mode:'insensitive'}},{attendee:{fullName:{contains:q.search,mode:'insensitive'}}}]}:{}) },
       select: {
         ...ticketView,
         attendee: { select: { fullName: true } },
         category: { select: { name: true } },
         credential: { select: { ticketId: true } },
       },
-      orderBy: { id: 'desc' },
+      orderBy: { id:q?'asc':'desc' },...(q?{take:51}:{}),
     });
-    return rows.map(({ credential, ...row }) => ({
+    const result=rows.map(({ credential, ...row }) => ({
       ...row,
       recoverable: !!credential,
     }));
+    return q?pageResult(result):result;
   }
   async candidates(
     eventId: number,
     userId: number,
     role: string,
     orgId: number,
+    query?:unknown,
   ) {
     await this.events.assertAccess(
       eventId,
@@ -71,8 +75,11 @@ export class TicketsService {
       orgId,
       'tickets.manage',
     );
-    return this.prisma.attendee.findMany({
-      where: { eventId, status: 'Registered' },
+    const q=query===undefined?undefined:listPage(query);
+    const rows=await this.prisma.attendee.findMany({
+      where: { eventId, status: 'Registered',...(q?.after?{id:{gt:q.after}}:{}),...(q?{tickets:{none:{status:{in:[...live]}}},category:{active:true},OR:[{guestInvitation:{is:null}},{guestInvitation:{active:true,student:{active:true}}}]}:{}),
+        ...(q?.studentId?{guestInvitation:{studentId:q.studentId,active:true,student:{active:true},...(q.group?{invitationGroup:q.group}:{})}}:q?.group?{guestInvitation:{invitationGroup:q.group,active:true,student:{active:true}}}:{}),
+        ...(q?.search?{AND:{OR:[{fullName:{contains:q.search,mode:'insensitive'}},{guestInvitation:{student:{fullName:{contains:q.search,mode:'insensitive'}}}},{guestInvitation:{student:{studentId:{contains:q.search,mode:'insensitive'}}}},{guestInvitation:{invitationGroup:{contains:q.search,mode:'insensitive'}}}]}}:{}) },
       select: {
         id: true,
         fullName: true,
@@ -88,8 +95,9 @@ export class TicketsService {
         },
         tickets: { where: { status: { in: [...live] } }, select: { id: true } },
       },
-      orderBy: { fullName: 'asc' },
+      orderBy:q?{id:'asc'}:{fullName:'asc'},...(q?{take:51}:{}),
     });
+    return q?pageResult(rows):rows;
   }
   async issue(
     eventId: number,

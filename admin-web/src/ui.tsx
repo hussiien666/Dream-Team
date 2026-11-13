@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { ApiError, type Client } from "./api";
+import { ApiError, SupersededRequest, type Client } from "./api";
 export const message = (e: unknown) =>
   e instanceof Error ? e.message : "The action could not be completed.";
 export function useResource<T>(api: Client, path: string) {
@@ -7,20 +7,38 @@ export function useResource<T>(api: Client, path: string) {
     api: Client; key: string; data?: T; error?: string; refreshing: boolean;
   }>();
   const [version, bump] = useState(0);
+  const lastLoad=useRef<{path:string;version:number}|undefined>(undefined);
+  const denied=useRef(false);
+  const retainPrevious=useRef(false);
   const key = path + "@" + version;
+  useEffect(()=>api.subscribe(reason=>{
+    retainPrevious.current=reason==='mutation';
+    if(reason==='denied'||reason==='logout'){denied.current=true;set({api,key,error:reason==='denied'?'Access changed. Refresh your permissions before continuing.':undefined,refreshing:false});return;}
+    denied.current=false;
+    if(reason!=='mutation')set(undefined);
+    bump(v=>v+1);
+  }),[api,key]);
+  useEffect(()=>{
+    if(path.startsWith('auth/')||path.startsWith('public/'))return;
+    const check=()=>{if(!document.hidden&&!denied.current&&!api.peekResource(path)?.fresh)bump(v=>v+1);};
+    const timer=setInterval(check,5000);window.addEventListener('focus',check);
+    return()=>{clearInterval(timer);window.removeEventListener('focus',check);};
+  },[api,path]);
   useEffect(() => {
     let active = true;
     const cached = api.peekResource<T>(path);
-    set({ api, key, data: cached?.data, refreshing: !cached?.fresh || version > 0 });
-    if (cached?.fresh && version === 0) return () => { active = false; };
+    const force=lastLoad.current?.path===path&&lastLoad.current.version!==version;lastLoad.current={path,version};
+    set(previous=>({ api, key, data:cached?.data??(previous?.api===api&&previous.key.startsWith(path+'@')?previous.data:undefined), refreshing: !cached?.fresh || force }));
+    if (cached?.fresh && !force) return () => { active = false; };
     api
-      .resource<T>(path, version > 0)
+      .resource<T>(path, force)
       .then((data) => {
         if (active) set({ api, key, data, refreshing: false });
       })
       .catch((e) => {
+        if(e instanceof SupersededRequest)return;
         const denied = e instanceof ApiError && [401, 403].includes(e.status);
-        if (active) set({ api, key, data: denied ? undefined : cached?.data, error: message(e), refreshing: false });
+        if (active) set(previous=>({ api, key, data: denied ? undefined : cached?.data??previous?.data, error: message(e), refreshing: false }));
       });
     return () => {
       active = false;
@@ -28,13 +46,14 @@ export function useResource<T>(api: Client, path: string) {
   }, [api, key, path, version]);
   const cached = api.peekResource<T>(path);
   const current = state?.api === api && state.key === key ? state : undefined;
-  const data = current ? current.data : cached?.data;
+  const previous = retainPrevious.current && state?.api===api && state.key.startsWith(path+'@') ? state.data : undefined;
+  const data = current ? current.data : cached?.data ?? previous;
   return {
     data,
     error: current?.error,
     loading: data === undefined && current?.refreshing !== false,
     refreshing: current?.refreshing ?? !cached?.fresh,
-    reload: useCallback(() => bump((v) => v + 1), []),
+    reload: useCallback(() => {denied.current=false;bump((v) => v + 1);}, []),
   };
 }
 export function Notice({ error }: { error?: string }) {
@@ -46,6 +65,19 @@ export function Notice({ error }: { error?: string }) {
 }
 export function Loading() {
   return <p role="status">Loading...</p>;
+}
+export function RefreshState({refreshing,error,hasData}:{refreshing:boolean;error?:string;hasData:boolean}) {
+  return <>{refreshing&&hasData&&<p role="status">Showing saved data while refreshing…</p>}{error&&hasData&&<p role="status">Refresh failed. Showing previously loaded data; retry before relying on current availability.</p>}</>;
+}
+export function useDebounced<T>(value:T){const [current,set]=useState(value);useEffect(()=>{const timer=setTimeout(()=>set(value),250);return()=>clearTimeout(timer);},[value]);return current;}
+export function usePage(key:string){
+  const [state,set]=useState<{key:string;after:number;previous:number[]}>({key,after:0,previous:[]});
+  const page=state.key===key?state:{key,after:0,previous:[]};
+  return {...page,next:(id:number)=>set({key,after:id,previous:[...page.previous,page.after]}),back:()=>set({key,after:page.previous.at(-1)??0,previous:page.previous.slice(0,-1)})};
+}
+export function PageControls({page,next,busy=false}:{page:ReturnType<typeof usePage>;next:number|null|undefined;busy?:boolean}){
+  return <nav className="page-controls" aria-label="Table pages"><button disabled={busy||!page.previous.length} onClick={page.back}>Previous page</button>
+    <span>Page {page.previous.length+1}</span><button disabled={busy||!next} onClick={()=>next&&page.next(next)}>Next page</button></nav>;
 }
 export function Empty({ children }: { children: React.ReactNode }) {
   return <p className="empty">{children}</p>;

@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, ConsoleLogger } from '@nestjs/common';
 import { ExpressAdapter, type NestExpressApplication } from '@nestjs/platform-express';
 import type { Express } from 'express';
-import { resolve } from 'node:path';
+import { resolve,basename } from 'node:path';
 import { existsSync } from 'node:fs';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
@@ -28,7 +28,9 @@ export async function createHttpApp(server?: Express) {
   const scannerDist = process.env.FUNCTION_TARGET
     ? resolve(import.meta.dirname, '../static/scanner')
     : resolve(import.meta.dirname, '../../scanner/dist');
-  if (existsSync(scannerDist)) app.useStaticAssets(scannerDist, { prefix: '/scan/' });
+  if (existsSync(scannerDist)) app.useStaticAssets(scannerDist, { prefix: '/scan/',setHeaders:(res,path)=>{
+    res.setHeader('Cache-Control',/^[^/]+-[A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|png|jpe?g|svg|webp)$/.test(basename(path))?'public, max-age=31536000, immutable':'no-store');
+  } });
   app.setGlobalPrefix('api/v1');
   const origins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5174').split(',').map(v => v.trim());
   app.enableCors({ origin: origins, credentials: false,

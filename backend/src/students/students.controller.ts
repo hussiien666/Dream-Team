@@ -15,6 +15,7 @@ import {
   BadRequestException,
   Header,
   HttpCode,
+  Query,
 } from '@nestjs/common';
 import { RegistrationUploadInterceptor } from './registration-upload.js';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
@@ -27,6 +28,7 @@ import { StudentsService } from './students.service.js';
 @Controller('events/:eventId')
 export class StudentsController {
   constructor(private readonly service: StudentsService) {}
+  @Get('registrations/page') page(@Param('eventId',ParseIntPipe) e:number,@Query() q:unknown,@Req() r:AuthenticatedRequest){return this.service.page(e,r,q);}
   @Get('registrations') overview(
     @Param('eventId', ParseIntPipe) e: number,
     @Req() r: AuthenticatedRequest,

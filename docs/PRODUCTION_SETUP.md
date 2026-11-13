@@ -1,6 +1,6 @@
 # Production preparation - 13 November 2026
 
-Controlling request: [production specification](PRODUCTION_MIGRATION_SPEC.md). Work is ongoing, not ready for final approval. Do not deploy until the owner explicitly confirms both Google AI Pro/developer credits and the billing address/account. Existing admin, scanner and API remain on Vercel with Aiven authority. The Cloud SQL development copy has migration 11, 47 tables and 279 verified rows; new migrations 12-15 are local preparation only.
+Controlling request: [production specification](PRODUCTION_MIGRATION_SPEC.md). Work is ongoing, not ready for final approval. Do not deploy until the owner explicitly confirms both Google AI Pro/developer credits and the billing address/account. Existing admin, scanner and API remain on Vercel with Aiven authority. The Cloud SQL development copy has migration 11, 47 tables and 279 verified rows; new migrations 12-16 are local preparation only.
 
 ## Runtime and database
 

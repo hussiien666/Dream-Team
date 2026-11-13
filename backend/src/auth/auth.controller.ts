@@ -51,11 +51,11 @@ export class AuthController {
   logout(@Req() req: AuthenticatedRequest) { return this.auth.logout(req.sessionHash); }
 
   @AllowPending() @Get('me')
-  me(@Req() req: AuthenticatedRequest) {
+  async me(@Req() req: AuthenticatedRequest) {
     // Request identity contains no hashes, passwords, private tokens or secrets.
     const sections=['Events','Event Dashboard'];
     if(req.orgRole==='super_admin')sections.push('Scanner Staff & Access','Account security');
-    return {user: req.user, role: req.orgRole, organizationId: req.orgId, permissions:[...ROLE_PERMISSIONS[req.orgRole] ?? []],requiresFactor:req.requiresFactor,requiresPasswordChange:req.requiresPasswordChange,enrolled:req.enrolled,authProvider:req.authProvider,email:req.email,sections};
+    return {user: req.user, role: req.orgRole, organizationId: req.orgId, accessRevision:await this.auth.accessRevision(req),permissions:[...ROLE_PERMISSIONS[req.orgRole] ?? []],requiresFactor:req.requiresFactor,requiresPasswordChange:req.requiresPasswordChange,enrolled:req.enrolled,authProvider:req.authProvider,email:req.email,sections};
   }
 
   @Post('firebase-exchange') @HttpCode(200)

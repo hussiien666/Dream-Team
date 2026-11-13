@@ -38,6 +38,8 @@ const OrganizationAudit = lazy(() => import("./organization-audit").then(m => ({
 const PublicInvitationPage = lazy(() => import("./invitations").then(m => ({ default: m.PublicInvitationPage })));
 const MobileTicketPage = lazy(() => import("./mobile-ticket").then(m => ({ default: m.MobileTicketPage })));
 const tokenKey = "dream-events-admin-token";
+const routeLoads:Record<string,()=>Promise<unknown>>={students:()=>import('./students'),tickets:()=>import('./tickets'),access:()=>import('./access'),reports:()=>import('./reports'),
+  attendees:()=>import('./attendees'),settings:()=>import('./events'),dashboard:()=>import('./events'),templates:()=>import('./templates'),announcements:()=>import('./announcements')};
 function Account({
   api,
   identity,
@@ -173,12 +175,20 @@ function Workspace({
     events.data?.find((e) => e.id === requested) ??
     (!match ? events.data?.[0] : undefined);
   const link = (name: string, to: string) => (
-    <Link key={to} to={to} aria-current={path === to ? "page" : undefined}>
+    <Link key={to} to={to} aria-current={path === to ? "page" : undefined} onMouseEnter={()=>prefetch(to)} onFocus={()=>prefetch(to)}>
       {name}
     </Link>
   );
+  const prefetch=(to:string)=>{
+    const target=to.match(/^\/events\/(\d+)\/([a-z]+)$/);if(!target)return;
+    void routeLoads[target[2]]?.();
+    const resource=target[2]==='dashboard'?`events/${target[1]}/dashboard`:target[2]==='students'?`events/${target[1]}/registrations/page?kind=students&status=active&search=`:
+      target[2]==='access'?`events/${target[1]}/categories`:target[2]==='reports'?`events/${target[1]}/reports`:null;
+    if(resource)api.prefetch(resource);
+  };
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside>
         <Link className="brand" to="/events">
           Dream Events
@@ -240,7 +250,7 @@ function Workspace({
             </label>
           )}
         </header>
-        <main className="content">
+        <main className="content" id="main-content" tabIndex={-1}>
           <Notice error={events.error} />
           {path === "/audit" ? (
             identity.role === "super_admin" ? <OrganizationAudit api={api}/> : <Empty>You do not have access to this section.</Empty>
@@ -347,7 +357,7 @@ function App() {
   const firebaseDispose = useRef<(() => Promise<void>) | undefined>(undefined);
   currentToken.current = token;
   const signedOut = useCallback(() => {
-    currentClient.current?.clearResources();
+    currentClient.current?.clearResources('logout');
     void firebaseDispose.current?.();
     firebaseDispose.current = undefined;
     currentToken.current = "";
@@ -368,7 +378,17 @@ function App() {
     [token, signedOut],
   );
   currentClient.current = api;
-  useEffect(() => () => api.clearResources(), [api]);
+  useEffect(() => () => api.clearResources('logout'), [api]);
+  useEffect(()=>{
+    if(!identity||identity.requiresFactor||identity.requiresPasswordChange)return;
+    let active=true,checking=false,last=Date.now();
+    const verify=async()=>{if(checking||document.hidden||Date.now()-last<15000)return;checking=true;last=Date.now();
+      try{const next=await api.request<Identity>('auth/me');if(!active||currentToken.current!==token)return;
+        if(JSON.stringify(next)!==JSON.stringify(identity)){api.clearResources();setIdentity(next);}
+      }catch{/* The client clears denied data; transient network failures preserve the current view. */}finally{checking=false;}};
+    const timer=setInterval(()=>void verify(),30000),focus=()=>void verify();window.addEventListener('focus',focus);document.addEventListener('visibilitychange',focus);
+    return()=>{active=false;clearInterval(timer);window.removeEventListener('focus',focus);document.removeEventListener('visibilitychange',focus);};
+  },[api,identity,token]);
   const reload = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -436,7 +456,7 @@ function App() {
         />
       </>
     );
-  return <Workspace key={JSON.stringify([identity.user.id, identity.organizationId, identity.role, identity.permissions])} api={api} identity={identity} logout={signedOut} />;
+  return <Workspace key={JSON.stringify([identity.user.id, identity.organizationId, identity.role, identity.permissions, identity.accessRevision])} api={api} identity={identity} logout={signedOut} />;
 }
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },

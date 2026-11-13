@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Client } from "./api";
 import { Dialog, Field, Notice, Loading, useAction, useResource } from "./ui";
 import { TurnstileChallenge } from './turnstile';
+import { PublicRegistrationForm } from './public-registration';
 
 export function InvitationLinkDialog({
   api,
@@ -122,14 +123,15 @@ export function InvitationLinkDialog({
     </Dialog>
   );
 }
-type Definition = {
+export type Definition = {
   key: string;
   label: string;
   type: string;
   required: boolean;
   options: string[];
+  target:'student'|'guest';
 };
-type View = {
+export type View = {
   turnstile: { siteKey: string } | null;
   event: {
     name: string;
@@ -139,6 +141,9 @@ type View = {
     timezone: string;
   };
   studentName: string;
+  student:{studentId:string;fullName:string;email:string;phone:string;customValues:Record<string,unknown>};
+  quantityIncludesStudent:false;
+  maxGuestsPerSubmission:number;
   guestLimit: number;
   defaultCategoryId: number | null;
   canAdd: boolean;
@@ -147,18 +152,22 @@ type View = {
   guests: {
     id: number;
     active: boolean;
+    email:string|null;customValues:Record<string,unknown>;
     attendee: {
       fullName: string;
+      phone:string;categoryId:number;
       category: { name: string };
       tickets: { status: string }[];
     };
   }[];
 };
 export function PublicInvitationPage() {
+  const [token,setToken]=useState(()=>location.hash.slice(1));
+  useEffect(()=>{const change=()=>setToken(location.hash.slice(1));addEventListener('hashchange',change);return()=>removeEventListener('hashchange',change);},[]);
   const api = useMemo(
     () =>
-      new Client(import.meta.env.VITE_API_URL || "", location.hash.slice(1)),
-    [],
+      new Client(import.meta.env.VITE_API_URL || "", token),
+    [token],
   );
   const data = useResource<View>(api, "public/invitations"),
     a = useAction();
@@ -166,6 +175,8 @@ export function PublicInvitationPage() {
     [cancel, setCancel] = useState<number>(),
     [message, setMessage] = useState(""),
     [key, setKey] = useState(() => crypto.randomUUID());
+  const [registration,setRegistration]=useState<{guest?:View['guests'][number]}>();
+  useEffect(()=>{setRegistration(undefined);setAdding(false);setCancel(undefined);setMessage('');setChallenge('');return()=>api.clearResources('logout');},[api]);
   const [challenge, setChallenge] = useState(''), [challengeVersion, setChallengeVersion] = useState(0);
   const submit = async (body: unknown) => {
     try {
@@ -197,6 +208,10 @@ export function PublicInvitationPage() {
             your limit is {data.data.guestLimit}.
           </p>
           <p>Keep this link private. Tickets are distributed separately.</p>
+          <p>Guest ticket quantity excludes your own student ticket. Existing guests are kept unless you cancel them.</p>
+          <button className="primary" disabled={!data.data.canAdd||a.busy} onClick={()=>setRegistration({})}>Open registration form</button>
+          <button onClick={data.reload} disabled={data.refreshing}>Refresh registration</button>
+          {registration&&<PublicRegistrationForm view={data.data} guest={registration.guest} api={api} close={()=>setRegistration(undefined)} saved={()=>{setRegistration(undefined);setMessage('Registration saved. Existing QR identities are preserved; printed details may need organizer refresh.');data.reload();}}/>}
           {!data.data.canAdd && (
             <p className="notice">
               Registration has closed. Existing invitations may still be
@@ -239,6 +254,7 @@ export function PublicInvitationPage() {
                             : "Active"}
                       </td>
                       <td>
+                        <button disabled={!g.active||!data.data!.canAdd||g.attendee.tickets.some(t=>t.status==='Used')} onClick={()=>setRegistration({guest:g})}>Edit guest</button>
                         <button
                           disabled={!g.active || a.busy}
                           onClick={() => {
@@ -323,7 +339,7 @@ export function PublicInvitationPage() {
                     ))}
                   </select>
                 </Field>
-                {data.data.fields.map((f) => (
+                {data.data.fields.filter(f=>f.target==='guest').map((f) => (
                   <Field key={f.key} label={f.label}>
                     {f.type === "dropdown" ? (
                       <select
